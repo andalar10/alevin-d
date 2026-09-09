@@ -14,3 +14,7 @@ Histórico funcional del proyecto (qué cambia para el usuario, no detalles téc
 - Resultado por cuarto y resultado final del partido.
 - Registro de goles y asistencias por cuarto.
 - Pendiente: generación del libro de temporada en PDF (una sección por partido + estadísticas finales separadas por amistoso/liga).
+
+## 2026-09-09 — Corrección de acceso
+
+- Arreglado un fallo por el que, tras entrar con el enlace de acceso, la app podía mostrar "email no autorizado" por diferencias de mayúsculas/espacios en el correo. Ahora la comprobación ignora eso, y si el email no coincide igualmente, el mensaje muestra qué email se usó para poder diagnosticarlo.
