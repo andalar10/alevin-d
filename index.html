@@ -56,9 +56,12 @@
   <div id="auth-form">
     <label>Email</label>
     <input id="auth-email" type="email" placeholder="tu@email.com" value="andres.alarcon@gmail.com">
+    <label style="margin-top:8px;">Contraseña</label>
+    <input id="auth-password" type="password" placeholder="••••••••">
     <div style="height:10px;"></div>
-    <button class="btn" onclick="enviarEnlace()">Enviar enlace de acceso</button>
-    <p class="muted">Te llegará un enlace de un solo uso a ese correo.</p>
+    <button class="btn" onclick="entrar()">Entrar</button>
+    <button class="btn sec" onclick="crearCuenta()">Crear cuenta (solo la primera vez)</button>
+    <p class="muted">La sesión se mantiene guardada en este dispositivo — no hace falta volver a entrar cada partido.</p>
   </div>
 </div>
 
@@ -122,13 +125,28 @@ let PARTIDO_ACTUAL = null; // id del partido abierto en detalle
 /* ============================================================
    AUTENTICACIÓN
    ============================================================ */
-async function enviarEnlace(){
+async function entrar(){
   const email = document.getElementById('auth-email').value.trim();
+  const password = document.getElementById('auth-password').value;
   const msg = document.getElementById('auth-msg');
-  if(!email){ msg.innerHTML = '<div class="aviso">Introduce un email.</div>'; return; }
-  const { error } = await sb.auth.signInWithOtp({ email, options:{ emailRedirectTo: window.location.href } });
+  if(!email || !password){ msg.innerHTML = '<div class="aviso">Introduce email y contraseña.</div>'; return; }
+  const { error } = await sb.auth.signInWithPassword({ email, password });
   if(error){ msg.innerHTML = `<div class="aviso">${error.message}</div>`; return; }
-  msg.innerHTML = '<div class="ok">Enlace enviado. Revisa tu correo y ábrelo en este mismo navegador.</div>';
+  msg.innerHTML = '';
+}
+async function crearCuenta(){
+  const email = document.getElementById('auth-email').value.trim();
+  const password = document.getElementById('auth-password').value;
+  const msg = document.getElementById('auth-msg');
+  if(!email || !password){ msg.innerHTML = '<div class="aviso">Introduce email y contraseña.</div>'; return; }
+  if(password.length < 6){ msg.innerHTML = '<div class="aviso">La contraseña debe tener al menos 6 caracteres.</div>'; return; }
+  const { data, error } = await sb.auth.signUp({ email, password });
+  if(error){ msg.innerHTML = `<div class="aviso">${error.message}</div>`; return; }
+  if(data.session){
+    msg.innerHTML = '<div class="ok">Cuenta creada y sesión iniciada.</div>';
+  } else {
+    msg.innerHTML = '<div class="aviso">Cuenta creada, pero Supabase pide confirmar el email antes de poder entrar. Si no quieres depender del correo, desactiva "Confirm email" en Authentication → Providers → Email del dashboard de Supabase, y vuelve a intentarlo.</div>';
+  }
 }
 async function cerrarSesion(){ await sb.auth.signOut(); location.reload(); }
 
