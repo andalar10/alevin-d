@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Alevín D</title>
+<style>
+  :root{
+    --azul:#1d4ed8; --azul-osc:#1e3a8a; --gris:#f4f5f7; --borde:#d8dbe0;
+    --texto:#1f2430; --verde:#15803d; --rojo:#b91c1c;
+  }
+  *{box-sizing:border-box;}
+  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:var(--gris);color:var(--texto);}
+  header{background:var(--azul-osc);color:#fff;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;}
+  header h1{font-size:18px;margin:0;}
+  nav{display:flex;gap:6px;}
+  nav button{background:transparent;border:1px solid rgba(255,255,255,.4);color:#fff;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:14px;}
+  nav button.activo{background:#fff;color:var(--azul-osc);font-weight:600;}
+  main{max-width:900px;margin:0 auto;padding:16px;}
+  .card{background:#fff;border:1px solid var(--borde);border-radius:8px;padding:16px;margin-bottom:16px;}
+  h2{margin-top:0;font-size:17px;}
+  h3{font-size:15px;margin:14px 0 8px;}
+  label{display:block;font-size:12px;color:#555;margin-bottom:2px;}
+  input,select{padding:6px 8px;border:1px solid var(--borde);border-radius:5px;font-size:14px;width:100%;}
+  .fila{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px;}
+  .fila > div{flex:1;min-width:120px;}
+  button.btn{background:var(--azul);color:#fff;border:none;padding:7px 14px;border-radius:6px;cursor:pointer;font-size:14px;}
+  button.btn.sec{background:#fff;color:var(--azul);border:1px solid var(--azul);}
+  button.btn.danger{background:#fff;color:var(--rojo);border:1px solid var(--rojo);}
+  button.chip-x{background:none;border:none;color:#b91c1c;cursor:pointer;font-weight:bold;margin-left:4px;}
+  table{width:100%;border-collapse:collapse;font-size:14px;}
+  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--borde);}
+  .badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:12px;background:#e5e7eb;}
+  .badge.fijo{background:#dbeafe;color:var(--azul-osc);}
+  .badge.temporal{background:#fef3c7;color:#92400e;}
+  .badge.amistoso{background:#e5e7eb;}
+  .badge.liga{background:#dcfce7;color:var(--verde);}
+  .linea-box{border:1px dashed var(--borde);border-radius:6px;padding:10px;margin-bottom:10px;}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0;}
+  .chip{background:var(--gris);border:1px solid var(--borde);border-radius:20px;padding:4px 10px;font-size:13px;display:flex;align-items:center;}
+  .chip input{width:70px;border:none;background:transparent;padding:0;margin-left:6px;font-size:12px;color:#555;}
+  .partido-item{cursor:pointer;padding:10px;border-bottom:1px solid var(--borde);}
+  .partido-item:hover{background:var(--gris);}
+  .oculto{display:none !important;}
+  .aviso{background:#fef2f2;border:1px solid #fecaca;color:var(--rojo);padding:8px 10px;border-radius:6px;font-size:13px;margin-bottom:10px;}
+  .ok{background:#f0fdf4;border:1px solid #bbf7d0;color:var(--verde);padding:8px 10px;border-radius:6px;font-size:13px;margin-bottom:10px;}
+  .muted{color:#777;font-size:13px;}
+  .volver{background:none;border:none;color:var(--azul);cursor:pointer;font-size:14px;margin-bottom:10px;padding:0;}
+</style>
+</head>
+<body>
+
+<div id="auth-gate" class="card" style="max-width:360px;margin:60px auto;">
+  <h2>Alevín D · acceso</h2>
+  <div id="auth-msg"></div>
+  <div id="auth-form">
+    <label>Email</label>
+    <input id="auth-email" type="email" placeholder="tu@email.com" value="andres.alarcon@gmail.com">
+    <div style="height:10px;"></div>
+    <button class="btn" onclick="enviarEnlace()">Enviar enlace de acceso</button>
+    <p class="muted">Te llegará un enlace de un solo uso a ese correo.</p>
+  </div>
+</div>
+
+<div id="app" class="oculto">
+  <header>
+    <h1>⚽ Alevín D</h1>
+    <nav>
+      <button id="nav-jugadores" onclick="irA('jugadores')">Jugadores</button>
+      <button id="nav-partidos" onclick="irA('partidos')">Partidos</button>
+      <button id="nav-libro" onclick="irA('libro')">Libro (PDF)</button>
+      <button onclick="cerrarSesion()" style="margin-left:8px;">Salir</button>
+    </nav>
+  </header>
+  <main id="main"></main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script>
+/* ============================================================
+   CONFIG
+   ============================================================ */
+const SUPABASE_URL = 'https://fxgjzfpasyxwiegmiwzb.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_xR-MTLBo-EU6l7h54jyPYQ_LqmdN71A';
+const EMAIL_AUTORIZADO = 'andres.alarcon@gmail.com';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+/* ============================================================
+   TABLA DE CÓDIGOS DE POSICIÓN
+   Convención: el equipo ataca hacia abajo del papel; dentro de
+   cada línea, el primer jugador introducido es siempre el más a
+   la derecha, el último el más a la izquierda.
+   ============================================================ */
+const TABLA_POSICIONES = {
+  portero:      { 1: ['GK'] },
+  defensa:      { 1: ['DCC'], 2: ['DCD','DCI'], 3: ['LD','DCC','LI'], 4: ['LD','DCD','DCI','LI'] },
+  medio:        { 1: ['MC'],  2: ['MCD','MCI'],  3: ['MCD','MC','MCI'], 4: ['MD','MCD','MCI','MI'] },
+  media_punta:  { 1: ['MP'] },
+  delantero:    { 1: ['DC'],  2: ['DD','DI'],     3: ['ED','DC','EI'] },
+};
+const NOMBRE_LINEA = { portero:'Portero', defensa:'Defensa', medio:'Medio', media_punta:'Media punta', delantero:'Delantero' };
+
+// Dado el tipo de línea y el nº de jugadores, devuelve los códigos en
+// orden (derecha → izquierda). Si no hay una entrada exacta en la
+// tabla, devuelve null y el llamante debe pedir los códigos a mano.
+function calcularCodigos(linea, n){
+  const tabla = TABLA_POSICIONES[linea];
+  if (tabla && tabla[n]) return tabla[n].slice();
+  return null;
+}
+
+/* ============================================================
+   ESTADO
+   ============================================================ */
+let SESSION = null;
+let JUGADORES = [];
+let TIPOS_PARTIDO = [];
+let PARTIDOS = [];
+let VISTA = 'jugadores';
+let PARTIDO_ACTUAL = null; // id del partido abierto en detalle
+
+/* ============================================================
+   AUTENTICACIÓN
+   ============================================================ */
+async function enviarEnlace(){
+  const email = document.getElementById('auth-email').value.trim();
+  const msg = document.getElementById('auth-msg');
+  if(!email){ msg.innerHTML = '<div class="aviso">Introduce un email.</div>'; return; }
+  const { error } = await sb.auth.signInWithOtp({ email, options:{ emailRedirectTo: window.location.href } });
+  if(error){ msg.innerHTML = `<div class="aviso">${error.message}</div>`; return; }
+  msg.innerHTML = '<div class="ok">Enlace enviado. Revisa tu correo y ábrelo en este mismo navegador.</div>';
+}
+async function cerrarSesion(){ await sb.auth.signOut(); location.reload(); }
+
+async function initAuth(){
+  const { data:{ session } } = await sb.auth.getSession();
+  SESSION = session;
+  sb.auth.onAuthStateChange((_evt, s) => { SESSION = s; pintarAuth(); });
+  pintarAuth();
+}
+function pintarAuth(){
+  const logueado = SESSION && SESSION.user && SESSION.user.email === EMAIL_AUTORIZADO;
+  document.getElementById('auth-gate').classList.toggle('oculto', !!logueado);
+  document.getElementById('app').classList.toggle('oculto', !logueado);
+  if (logueado) cargarTodo();
+  else if (SESSION && SESSION.user && SESSION.user.email !== EMAIL_AUTORIZADO){
+    document.getElementById('auth-msg').innerHTML = '<div class="aviso">Este email no tiene acceso a Alevín D.</div>';
+  }
+}
+
+/* ============================================================
+   CARGA DE DATOS
+   ============================================================ */
+async function cargarTodo(){
+  await Promise.all([cargarJugadores(), cargarTiposPartido(), cargarPartidos()]);
+  irA(VISTA);
+}
+async function cargarJugadores(){
+  const { data, error } = await sb.from('alevin_d_jugadores').select('*').order('activo',{ascending:false}).order('dorsal');
+  if(!error) JUGADORES = data;
+}
+async function cargarTiposPartido(){
+  const { data, error } = await sb.from('alevin_d_tipos_partido').select('*').order('id');
+  if(!error) TIPOS_PARTIDO = data;
+}
+async function cargarPartidos(){
+  const { data, error } = await sb.from('alevin_d_partidos').select('*, alevin_d_tipos_partido(nombre)').order('fecha',{ascending:false});
+  if(!error) PARTIDOS = data;
+}
+
+/* ============================================================
+   NAVEGACIÓN
+   ============================================================ */
+function irA(vista){
+  VISTA = vista;
+  PARTIDO_ACTUAL = null;
+  ['jugadores','partidos','libro'].forEach(v => {
+    document.getElementById('nav-'+v).classList.toggle('activo', v === vista);
+  });
+  if(vista === 'jugadores') renderJugadores();
+  if(vista === 'partidos') renderPartidos();
+  if(vista === 'libro') renderLibro();
+}
+
+/* ============================================================
+   JUGADORES
+   ============================================================ */
+function renderJugadores(){
+  const main = document.getElementById('main');
+  const filas = JUGADORES.map(j => `
+    <tr>
+      <td>${j.dorsal ?? '-'}</td>
+      <td>${j.nombre}</td>
+      <td><span class="badge ${j.tipo}">${j.tipo}</span></td>
+      <td>${j.activo ? 'Sí' : 'No'}</td>
+      <td>
+        <button class="btn sec" onclick="toggleActivoJugador('${j.id}', ${!j.activo})">${j.activo ? 'Dar de baja' : 'Reactivar'}</button>
+      </td>
+    </tr>`).join('');
+  main.innerHTML = `
+    <div class="card">
+      <h2>Añadir jugador</h2>
+      <div class="fila">
+        <div><label>Nombre</label><input id="nj-nombre"></div>
+        <div><label>Dorsal</label><input id="nj-dorsal" type="number"></div>
+        <div><label>Tipo</label>
+          <select id="nj-tipo"><option value="fijo">Fijo</option><option value="temporal">Temporal</option></select>
+        </div>
+      </div>
+      <button class="btn" onclick="crearJugador()">Añadir</button>
+    </div>
+    <div class="card">
+      <h2>Plantilla</h2>
+      <table>
+        <thead><tr><th>Dorsal</th><th>Nombre</th><th>Tipo</th><th>Activo</th><th></th></tr></thead>
+        <tbody>${filas}</tbody>
+      </table>
+    </div>`;
+}
+async function crearJugador(){
+  const nombre = document.getElementById('nj-nombre').value.trim();
+  const dorsalRaw = document.getElementById('nj-dorsal').value;
+  const tipo = document.getElementById('nj-tipo').value;
+  if(!nombre) return alert('Falta el nombre');
+  const { error } = await sb.from('alevin_d_jugadores').insert({
+    nombre, dorsal: dorsalRaw ? parseInt(dorsalRaw) : null, tipo
+  });
+  if(error) return alert(error.message);
+  await cargarJugadores();
+  renderJugadores();
+}
+async function toggleActivoJugador(id, nuevoValor){
+  const { error } = await sb.from('alevin_d_jugadores').update({ activo: nuevoValor }).eq('id', id);
+  if(error) return alert(error.message);
+  await cargarJugadores();
+  renderJugadores();
+}
+
+/* ============================================================
+   PARTIDOS — listado y alta
+   ============================================================ */
+function renderPartidos(){
+  if(PARTIDO_ACTUAL) return renderPartidoDetalle();
+  const main = document.getElementById('main');
+  const opcionesTipo = TIPOS_PARTIDO.map(t => `<option value="${t.id}">${t.nombre}</option>`).join('');
+  const items = PARTIDOS.map(p => `
+    <div class="partido-item" onclick="abrirPartido('${p.id}')">
+      <strong>${p.rival}</strong>
+      <span class="badge ${ (p.alevin_d_tipos_partido?.nombre||'').toLowerCase() }">${p.alevin_d_tipos_partido?.nombre ?? ''}</span>
+      — ${p.fecha}${p.hora ? ' · '+p.hora : ''} ${p.condicion ? '('+p.condicion+')' : ''}
+      ${ (p.goles_favor!=null && p.goles_contra!=null) ? `<span class="muted"> · Resultado: ${p.goles_favor} - ${p.goles_contra}</span>` : '' }
+    </div>`).join('') || '<p class="muted">Aún no hay partidos.</p>';
+  main.innerHTML = `
+    <div class="card">
+      <h2>Nuevo partido</h2>
+      <div class="fila">
+        <div><label>Rival</label><input id="np-rival"></div>
+        <div><label>Fecha</label><input id="np-fecha" type="date"></div>
+        <div><label>Hora</label><input id="np-hora" type="time"></div>
+      </div>
+      <div class="fila">
+        <div><label>Condición</label>
+          <select id="np-condicion"><option value="casa">Casa</option><option value="fuera">Fuera</option></select>
+        </div>
+        <div><label>Tipo de partido</label>
+          <select id="np-tipo">${opcionesTipo}</select>
+        </div>
+        <div><label>&nbsp;</label>
+          <button class="btn sec" onclick="nuevoTipoPartido()" type="button">+ Nuevo tipo</button>
+        </div>
+      </div>
+      <button class="btn" onclick="crearPartido()">Crear partido</button>
+    </div>
+    <div class="card">
+      <h2>Partidos</h2>
+      ${items}
+    </div>`;
+}
+async function nuevoTipoPartido(){
+  const nombre = prompt('Nombre del nuevo tipo de partido (p.ej. "Copa"):');
+  if(!nombre) return;
+  const { error } = await sb.from('alevin_d_tipos_partido').insert({ nombre });
+  if(error) return alert(error.message);
+  await cargarTiposPartido();
+  renderPartidos();
+}
+async function crearPartido(){
+  const rival = document.getElementById('np-rival').value.trim();
+  const fecha = document.getElementById('np-fecha').value;
+  const hora = document.getElementById('np-hora').value || null;
+  const condicion = document.getElementById('np-condicion').value;
+  const tipo_partido_id = parseInt(document.getElementById('np-tipo').value);
+  if(!rival || !fecha) return alert('Rival y fecha son obligatorios');
+  const { data, error } = await sb.from('alevin_d_partidos')
+    .insert({ rival, fecha, hora, condicion, tipo_partido_id }).select().single();
+  if(error) return alert(error.message);
+  await cargarPartidos();
+  abrirPartido(data.id);
+}
+
+/* ============================================================
+   PARTIDO — detalle (convocatoria, foto, 4 cuartos)
+   ============================================================ */
+let DETALLE = null; // { partido, convocatoria:[{jugador_id,dorsal_partido,jugador}], cuartos:{1:{...},2:...} }
+
+async function abrirPartido(id){
+  PARTIDO_ACTUAL = id;
+  await cargarDetallePartido(id);
+  VISTA = 'partidos';
+  document.getElementById('nav-partidos').classList.add('activo');
+  document.getElementById('nav-jugadores').classList.remove('activo');
+  document.getElementById('nav-libro').classList.remove('activo');
+  renderPartidoDetalle();
+}
+async function cargarDetallePartido(id){
+  const partido = PARTIDOS.find(p => p.id === id) || (await sb.from('alevin_d_partidos').select('*, alevin_d_tipos_partido(nombre)').eq('id', id).single()).data;
+  const { data: conv } = await sb.from('alevin_d_convocatoria').select('*, alevin_d_jugadores(*)').eq('partido_id', id);
+  const { data: cuartosRows } = await sb.from('alevin_d_cuartos').select('*').eq('partido_id', id).order('numero');
+  const cuartos = {};
+  for (let n=1; n<=4; n++){
+    const row = (cuartosRows||[]).find(c => c.numero === n);
+    let alineacion = [];
+    let goles = [];
+    if(row){
+      const { data: al } = await sb.from('alevin_d_alineacion_cuarto').select('*, alevin_d_jugadores(nombre)').eq('cuarto_id', row.id);
+      alineacion = al || [];
+      const { data: gl } = await sb.from('alevin_d_goles').select('*, autor:alevin_d_jugadores!alevin_d_goles_jugador_id_fkey(nombre), asistente:alevin_d_jugadores!alevin_d_goles_asistente_id_fkey(nombre)').eq('cuarto_id', row.id);
+      goles = gl || [];
+    }
+    cuartos[n] = { row, alineacion, goles };
+  }
+  DETALLE = { partido, convocatoria: conv || [], cuartos };
+}
+function jugadorPorId(id){ return JUGADORES.find(j => j.id === id); }
+
+function renderPartidoDetalle(){
+  const main = document.getElementById('main');
+  if(!DETALLE){ main.innerHTML = '<p class="muted">Cargando…</p>'; return; }
+  const p = DETALLE.partido;
+  const convocados = new Set(DETALLE.convocatoria.map(c => c.jugador_id));
+  const filasJugadores = JUGADORES.filter(j => j.activo || convocados.has(j.id)).map(j => `
+    <label style="display:flex;align-items:center;gap:6px;font-weight:normal;">
+      <input type="checkbox" ${convocados.has(j.id)?'checked':''} onchange="toggleConvocado('${j.id}', this.checked)">
+      ${j.dorsal ?? '-'} · ${j.nombre} <span class="badge ${j.tipo}" style="font-size:10px;">${j.tipo}</span>
+    </label>`).join('');
+
+  let cuartosHtml = '';
+  for(let n=1; n<=4; n++) cuartosHtml += renderCuarto(n);
+
+  main.innerHTML = `
+    <button class="volver" onclick="irA('partidos')">← Volver a partidos</button>
+    <div class="card">
+      <h2>${p.rival} — ${p.fecha}</h2>
+      <p class="muted">${p.alevin_d_tipos_partido?.nombre ?? ''} · ${p.condicion ?? ''} ${p.hora ? '· '+p.hora : ''}</p>
+      <div class="fila">
+        <div><label>Goles a favor</label><input id="pd-gf" type="number" value="${p.goles_favor ?? ''}"></div>
+        <div><label>Goles en contra</label><input id="pd-gc" type="number" value="${p.goles_contra ?? ''}"></div>
+        <div style="align-self:flex-end;"><button class="btn sec" onclick="guardarResultadoFinal()">Guardar resultado</button></div>
+      </div>
+      <h3>Foto de convocatoria</h3>
+      <input type="file" id="pd-foto" accept="image/*" onchange="subirFotoConvocatoria(this.files[0])">
+      ${p.foto_convocatoria_path ? `<p class="muted">Foto guardada: ${p.foto_convocatoria_path}</p>` : ''}
+    </div>
+    <div class="card">
+      <h3>Convocatoria</h3>
+      <div class="fila" style="flex-direction:column;">${filasJugadores}</div>
+      <div class="fila" style="margin-top:10px;">
+        <div><input id="pd-temporal-nombre" placeholder="Nombre jugador temporal"></div>
+        <div><input id="pd-temporal-dorsal" type="number" placeholder="Dorsal (opcional)"></div>
+        <div><button class="btn sec" onclick="anadirTemporalYConvocar()">+ Añadir temporal y convocar</button></div>
+      </div>
+    </div>
+    ${cuartosHtml}
+  `;
+}
+async function guardarResultadoFinal(){
+  const gf = document.getElementById('pd-gf').value;
+  const gc = document.getElementById('pd-gc').value;
+  const { error } = await sb.from('alevin_d_partidos').update({
+    goles_favor: gf === '' ? null : parseInt(gf),
+    goles_contra: gc === '' ? null : parseInt(gc)
+  }).eq('id', PARTIDO_ACTUAL);
+  if(error) return alert(error.message);
+  await cargarPartidos();
+  alert('Resultado guardado');
+}
+async function toggleConvocado(jugadorId, marcado){
+  if(marcado){
+    const { error } = await sb.from('alevin_d_convocatoria').insert({ partido_id: PARTIDO_ACTUAL, jugador_id: jugadorId });
+    if(error) return alert(error.message);
+  } else {
+    const { error } = await sb.from('alevin_d_convocatoria').delete().eq('partido_id', PARTIDO_ACTUAL).eq('jugador_id', jugadorId);
+    if(error) return alert(error.message);
+  }
+  await cargarDetallePartido(PARTIDO_ACTUAL);
+  renderPartidoDetalle();
+}
+async function anadirTemporalYConvocar(){
+  const nombre = document.getElementById('pd-temporal-nombre').value.trim();
+  const dorsalRaw = document.getElementById('pd-temporal-dorsal').value;
+  if(!nombre) return alert('Falta el nombre');
+  const { data, error } = await sb.from('alevin_d_jugadores').insert({ nombre, tipo:'temporal', dorsal: dorsalRaw?parseInt(dorsalRaw):null }).select().single();
+  if(error) return alert(error.message);
+  await cargarJugadores();
+  const { error: e2 } = await sb.from('alevin_d_convocatoria').insert({ partido_id: PARTIDO_ACTUAL, jugador_id: data.id, dorsal_partido: dorsalRaw?parseInt(dorsalRaw):null });
+  if(e2) return alert(e2.message);
+  await cargarDetallePartido(PARTIDO_ACTUAL);
+  renderPartidoDetalle();
+}
+async function subirFotoConvocatoria(file){
+  if(!file) return;
+  const ext = file.name.split('.').pop();
+  const path = `${PARTIDO_ACTUAL}/convocatoria.${ext}`;
+  const { error } = await sb.storage.from('alevin-d-fotos').upload(path, file, { upsert: true });
+  if(error) return alert(error.message);
+  const { error: e2 } = await sb.from('alevin_d_partidos').update({ foto_convocatoria_path: path }).eq('id', PARTIDO_ACTUAL);
+  if(e2) return alert(e2.message);
+  await cargarPartidos();
+  await cargarDetallePartido(PARTIDO_ACTUAL);
+  renderPartidoDetalle();
+}
+
+/* ============================================================
+   CUARTOS — líneas, cálculo de posiciones, goles/asistencias
+   ============================================================ */
+// Estado temporal de edición de líneas por cuarto (no persistido hasta "Guardar")
+const EDICION_CUARTO = {}; // { [numero]: { portero:[jugador_id], defensa:[...], medio:[...], media_punta:[...], delantero:[...] } }
+
+function jugadoresConvocados(){
+  return DETALLE.convocatoria.map(c => c.alevin_d_jugadores).filter(Boolean);
+}
+function iniciarEdicionCuarto(n){
+  if(EDICION_CUARTO[n]) return;
+  const c = DETALLE.cuartos[n];
+  const porLinea = { portero:[], defensa:[], medio:[], media_punta:[], delantero:[] };
+  (c.alineacion||[]).slice().sort((a,b)=>a.orden_en_linea-b.orden_en_linea).forEach(a => {
+    porLinea[a.linea].push(a.jugador_id);
+  });
+  EDICION_CUARTO[n] = porLinea;
+}
+function renderCuarto(n){
+  iniciarEdicionCuarto(n);
+  const c = DETALLE.cuartos[n];
+  const edicion = EDICION_CUARTO[n];
+  const convocados = jugadoresConvocados();
+
+  const lineasHtml = Object.keys(NOMBRE_LINEA).map(linea => {
+    const seleccion = edicion[linea];
+    const codigos = calcularCodigos(linea, seleccion.length) || [];
+    const chips = seleccion.map((jid, idx) => {
+      const j = jugadorPorId(jid);
+      const codigo = codigos[idx] || '';
+      return `<span class="chip">${j ? j.nombre : '?'}
+        <input type="text" value="${codigo}" data-linea="${linea}" data-idx="${idx}" onchange="codigoManual(${n}, this)" title="código de posición (editable)">
+        <button class="chip-x" onclick="quitarDeLinea(${n}, '${linea}', ${idx})">×</button>
+      </span>`;
+    }).join('');
+    const avisoSinTabla = seleccion.length > 0 && !calcularCodigos(linea, seleccion.length)
+      ? `<p class="muted">Sin regla automática para ${seleccion.length} jugador(es) en esta línea — edita los códigos a mano.</p>` : '';
+    const opciones = convocados
+      .filter(j => !seleccion.includes(j.id))
+      .map(j => `<option value="${j.id}">${j.nombre}</option>`).join('');
+    const notaPortero = (linea === 'portero' && seleccion.length === 0)
+      ? '<p class="muted">Vacío = se mantiene el mismo portero que en el cuarto anterior.</p>' : '';
+    return `
+      <div class="linea-box">
+        <strong>${NOMBRE_LINEA[linea]}</strong>
+        <div class="chips">${chips || '<span class="muted">— sin jugadores —</span>'}</div>
+        ${avisoSinTabla}${notaPortero}
+        <select onchange="anadirALinea(${n}, '${linea}', this.value); this.value='';">
+          <option value="">+ añadir jugador…</option>
+          ${opciones}
+        </select>
+      </div>`;
+  }).join('');
+
+  const goles = c.goles.map(g => `
+    <li>⚽ ${g.autor?.nombre ?? '?'} ${g.asistente ? `(asist. ${g.asistente.nombre})` : ''}
+      <button class="chip-x" onclick="borrarGol('${g.id}', ${n})">×</button>
+    </li>`).join('');
+  const opcionesGoleador = convocados.map(j => `<option value="${j.id}">${j.nombre}</option>`).join('');
+
+  return `
+    <div class="card">
+      <h3>Cuarto ${n}</h3>
+      <div class="fila">
+        <div><label>Goles equipo</label><input id="cq-ge-${n}" type="number" value="${c.row?.goles_equipo ?? ''}"></div>
+        <div><label>Goles rival</label><input id="cq-gr-${n}" type="number" value="${c.row?.goles_rival ?? ''}"></div>
+      </div>
+      ${lineasHtml}
+      <button class="btn" onclick="guardarCuarto(${n})">Guardar alineación del cuarto ${n}</button>
+      <h4>Goles de este cuarto</h4>
+      <ul>${goles || '<li class="muted">Sin goles registrados</li>'}</ul>
+      <div class="fila">
+        <div><label>Goleador</label><select id="gol-autor-${n}"><option value="">—</option>${opcionesGoleador}</select></div>
+        <div><label>Asistente (opcional)</label><select id="gol-asist-${n}"><option value="">—</option>${opcionesGoleador}</select></div>
+        <div style="align-self:flex-end;"><button class="btn sec" onclick="anadirGol(${n})">+ Añadir gol</button></div>
+      </div>
+    </div>`;
+}
+function anadirALinea(n, linea, jugadorId){
+  if(!jugadorId) return;
+  EDICION_CUARTO[n][linea].push(jugadorId);
+  renderPartidoDetalle();
+}
+function quitarDeLinea(n, linea, idx){
+  EDICION_CUARTO[n][linea].splice(idx, 1);
+  renderPartidoDetalle();
+}
+function codigoManual(n, input){
+  // El valor se lee directamente del input al guardar; no hace falta
+  // guardar estado intermedio, solo evitar que el re-render lo pierda
+  // antes de tiempo (guardarCuarto lee el DOM).
+}
+async function guardarCuarto(n){
+  const edicion = EDICION_CUARTO[n];
+  let cuartoId = DETALLE.cuartos[n].row?.id;
+
+  // Portero: si no se ha puesto ninguno, heredar el del cuarto anterior
+  let porteroId = edicion.portero[0];
+  if(!porteroId){
+    for(let prev = n-1; prev >= 1; prev--){
+      const anterior = (DETALLE.cuartos[prev].alineacion||[]).find(a => a.linea === 'portero');
+      if(anterior){ porteroId = anterior.jugador_id; break; }
+    }
+  }
+
+  const ge = document.getElementById(`cq-ge-${n}`).value;
+  const gr = document.getElementById(`cq-gr-${n}`).value;
+
+  if(!cuartoId){
+    const { data, error } = await sb.from('alevin_d_cuartos').insert({
+      partido_id: PARTIDO_ACTUAL, numero: n,
+      goles_equipo: ge===''?null:parseInt(ge), goles_rival: gr===''?null:parseInt(gr)
+    }).select().single();
+    if(error) return alert(error.message);
+    cuartoId = data.id;
+  } else {
+    const { error } = await sb.from('alevin_d_cuartos').update({
+      goles_equipo: ge===''?null:parseInt(ge), goles_rival: gr===''?null:parseInt(gr)
+    }).eq('id', cuartoId);
+    if(error) return alert(error.message);
+  }
+
+  // Reconstruir alineación completa del cuarto
+  await sb.from('alevin_d_alineacion_cuarto').delete().eq('cuarto_id', cuartoId);
+  const filas = [];
+  Object.keys(NOMBRE_LINEA).forEach(linea => {
+    let jugadoresLinea = edicion[linea];
+    if(linea === 'portero'){
+      jugadoresLinea = porteroId ? [porteroId] : [];
+    }
+    jugadoresLinea.forEach((jid, idx) => {
+      const inputCodigo = document.querySelector(`input[data-linea="${linea}"][data-idx="${idx}"]`);
+      const codigos = calcularCodigos(linea, jugadoresLinea.length);
+      const codigo = (inputCodigo && inputCodigo.value.trim()) || (codigos ? codigos[idx] : '?');
+      filas.push({ cuarto_id: cuartoId, jugador_id: jid, linea, orden_en_linea: idx+1, posicion_codigo: codigo });
+    });
+  });
+  if(filas.length){
+    const { error } = await sb.from('alevin_d_alineacion_cuarto').insert(filas);
+    if(error) return alert(error.message);
+  }
+  delete EDICION_CUARTO[n];
+  await cargarDetallePartido(PARTIDO_ACTUAL);
+  renderPartidoDetalle();
+}
+async function anadirGol(n){
+  const cuartoId = DETALLE.cuartos[n].row?.id;
+  if(!cuartoId) return alert('Guarda antes la alineación del cuarto para poder registrar goles.');
+  const autor = document.getElementById(`gol-autor-${n}`).value;
+  const asistente = document.getElementById(`gol-asist-${n}`).value || null;
+  if(!autor) return alert('Falta el goleador');
+  const { error } = await sb.from('alevin_d_goles').insert({ cuarto_id: cuartoId, jugador_id: autor, asistente_id: asistente });
+  if(error) return alert(error.message);
+  await cargarDetallePartido(PARTIDO_ACTUAL);
+  renderPartidoDetalle();
+}
+async function borrarGol(id, n){
+  const { error } = await sb.from('alevin_d_goles').delete().eq('id', id);
+  if(error) return alert(error.message);
+  await cargarDetallePartido(PARTIDO_ACTUAL);
+  renderPartidoDetalle();
+}
+
+/* ============================================================
+   LIBRO / PDF — pendiente
+   ============================================================ */
+function renderLibro(){
+  document.getElementById('main').innerHTML = `
+    <div class="card">
+      <h2>Libro de temporada (PDF)</h2>
+      <p class="muted">Próximamente: generación del PDF con todos los partidos, alineaciones y estadísticas, separando amistosos de liga.</p>
+    </div>`;
+}
+
+/* ============================================================
+   ARRANQUE
+   ============================================================ */
+initAuth();
+</script>
+</body>
+</html>
