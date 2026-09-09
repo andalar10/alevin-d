@@ -72,7 +72,8 @@
       <button id="nav-jugadores" onclick="irA('jugadores')">Jugadores</button>
       <button id="nav-partidos" onclick="irA('partidos')">Partidos</button>
       <button id="nav-libro" onclick="irA('libro')">Libro (PDF)</button>
-      <button onclick="cerrarSesion()" style="margin-left:8px;">Salir</button>
+      <button onclick="cambiarContrasena()" style="margin-left:8px;">Cambiar contraseña</button>
+      <button onclick="cerrarSesion()">Salir</button>
     </nav>
   </header>
   <main id="main"></main>
@@ -149,6 +150,14 @@ async function crearCuenta(){
   }
 }
 async function cerrarSesion(){ await sb.auth.signOut(); location.reload(); }
+async function cambiarContrasena(){
+  const nueva = prompt('Nueva contraseña (mínimo 6 caracteres):');
+  if(!nueva) return;
+  if(nueva.length < 6){ alert('Debe tener al menos 6 caracteres.'); return; }
+  const { error } = await sb.auth.updateUser({ password: nueva });
+  if(error) return alert(error.message);
+  alert('Contraseña actualizada.');
+}
 
 async function initAuth(){
   const { data:{ session } } = await sb.auth.getSession();
@@ -205,18 +214,45 @@ function irA(vista){
 /* ============================================================
    JUGADORES
    ============================================================ */
+let JUGADOR_EN_EDICION = null; // id del jugador con el panel de edición abierto
+let VER_BAJAS = false;
+
+function nombreConAlias(j){
+  return j.alias ? `${j.nombre} <span class="muted">(${j.alias})</span>` : j.nombre;
+}
 function renderJugadores(){
   const main = document.getElementById('main');
-  const filas = JUGADORES.map(j => `
-    <tr>
-      <td>${j.dorsal ?? '-'}</td>
-      <td>${j.nombre}</td>
-      <td><span class="badge ${j.tipo}">${j.tipo}</span></td>
-      <td>${j.activo ? 'Sí' : 'No'}</td>
-      <td>
-        <button class="btn sec" onclick="toggleActivoJugador('${j.id}', ${!j.activo})">${j.activo ? 'Dar de baja' : 'Reactivar'}</button>
-      </td>
-    </tr>`).join('');
+  const lista = JUGADORES.filter(j => VER_BAJAS ? !j.activo : j.activo);
+  const filas = lista.map(j => {
+    const editando = JUGADOR_EN_EDICION === j.id;
+    if(editando){
+      return `
+        <tr>
+          <td colspan="3">
+            <div class="fila">
+              <div><label>Nombre</label><input id="ej-nombre-${j.id}" value="${j.nombre}"></div>
+              <div><label>Alias / apodo</label><input id="ej-alias-${j.id}" value="${j.alias ?? ''}" placeholder="p.ej. Xavi"></div>
+              <div><label>Dorsal</label><input id="ej-dorsal-${j.id}" type="number" value="${j.dorsal ?? ''}"></div>
+              <div><label>Tipo</label>
+                <select id="ej-tipo-${j.id}">
+                  <option value="fijo" ${j.tipo==='fijo'?'selected':''}>Fijo (plantilla habitual)</option>
+                  <option value="temporal" ${j.tipo==='temporal'?'selected':''}>Temporal (viene puntualmente)</option>
+                </select>
+              </div>
+            </div>
+            <button class="btn" onclick="guardarEdicionJugador('${j.id}')">Guardar</button>
+            <button class="btn sec" onclick="JUGADOR_EN_EDICION=null; renderJugadores();">Cancelar</button>
+            <button class="btn danger" onclick="toggleActivoJugador('${j.id}', ${!j.activo})">${j.activo ? 'Dar de baja' : 'Reactivar'}</button>
+          </td>
+        </tr>`;
+    }
+    return `
+      <tr>
+        <td>${j.dorsal ?? '-'}</td>
+        <td>${nombreConAlias(j)}</td>
+        <td><button class="btn sec" onclick="JUGADOR_EN_EDICION='${j.id}'; renderJugadores();">Editar</button></td>
+      </tr>`;
+  }).join('');
   main.innerHTML = `
     <div class="card">
       <h2>Añadir jugador</h2>
@@ -224,17 +260,21 @@ function renderJugadores(){
         <div><label>Nombre</label><input id="nj-nombre"></div>
         <div><label>Dorsal</label><input id="nj-dorsal" type="number"></div>
         <div><label>Tipo</label>
-          <select id="nj-tipo"><option value="fijo">Fijo</option><option value="temporal">Temporal</option></select>
+          <select id="nj-tipo">
+            <option value="fijo">Fijo (plantilla habitual)</option>
+            <option value="temporal">Temporal (viene puntualmente)</option>
+          </select>
         </div>
       </div>
       <button class="btn" onclick="crearJugador()">Añadir</button>
     </div>
     <div class="card">
-      <h2>Plantilla</h2>
+      <h2>Plantilla ${VER_BAJAS ? '— dados de baja' : ''}</h2>
       <table>
-        <thead><tr><th>Dorsal</th><th>Nombre</th><th>Tipo</th><th>Activo</th><th></th></tr></thead>
-        <tbody>${filas}</tbody>
+        <thead><tr><th>Dorsal</th><th>Nombre</th><th></th></tr></thead>
+        <tbody>${filas || '<tr><td colspan="3" class="muted">Sin jugadores.</td></tr>'}</tbody>
       </table>
+      <button class="btn sec" style="margin-top:8px;" onclick="VER_BAJAS=!VER_BAJAS; renderJugadores();">${VER_BAJAS ? '← Ver plantilla activa' : 'Ver dados de baja'}</button>
     </div>`;
 }
 async function crearJugador(){
@@ -249,9 +289,24 @@ async function crearJugador(){
   await cargarJugadores();
   renderJugadores();
 }
+async function guardarEdicionJugador(id){
+  const nombre = document.getElementById(`ej-nombre-${id}`).value.trim();
+  const alias = document.getElementById(`ej-alias-${id}`).value.trim();
+  const dorsalRaw = document.getElementById(`ej-dorsal-${id}`).value;
+  const tipo = document.getElementById(`ej-tipo-${id}`).value;
+  if(!nombre) return alert('Falta el nombre');
+  const { error } = await sb.from('alevin_d_jugadores').update({
+    nombre, alias: alias || null, dorsal: dorsalRaw ? parseInt(dorsalRaw) : null, tipo
+  }).eq('id', id);
+  if(error) return alert(error.message);
+  JUGADOR_EN_EDICION = null;
+  await cargarJugadores();
+  renderJugadores();
+}
 async function toggleActivoJugador(id, nuevoValor){
   const { error } = await sb.from('alevin_d_jugadores').update({ activo: nuevoValor }).eq('id', id);
   if(error) return alert(error.message);
+  JUGADOR_EN_EDICION = null;
   await cargarJugadores();
   renderJugadores();
 }
@@ -314,6 +369,13 @@ async function crearPartido(){
   const { data, error } = await sb.from('alevin_d_partidos')
     .insert({ rival, fecha, hora, condicion, tipo_partido_id }).select().single();
   if(error) return alert(error.message);
+  // Convocatoria por defecto: todos los jugadores activos, se desmarcan los que falten
+  const activos = JUGADORES.filter(j => j.activo);
+  if(activos.length){
+    const { error: e2 } = await sb.from('alevin_d_convocatoria')
+      .insert(activos.map(j => ({ partido_id: data.id, jugador_id: j.id })));
+    if(e2) return alert(e2.message);
+  }
   await cargarPartidos();
   abrirPartido(data.id);
 }
@@ -359,9 +421,9 @@ function renderPartidoDetalle(){
   const p = DETALLE.partido;
   const convocados = new Set(DETALLE.convocatoria.map(c => c.jugador_id));
   const filasJugadores = JUGADORES.filter(j => j.activo || convocados.has(j.id)).map(j => `
-    <label style="display:flex;align-items:center;gap:6px;font-weight:normal;">
+    <label style="display:flex;align-items:center;gap:8px;font-weight:normal;padding:4px 0;">
       <input type="checkbox" ${convocados.has(j.id)?'checked':''} onchange="toggleConvocado('${j.id}', this.checked)">
-      ${j.dorsal ?? '-'} · ${j.nombre} <span class="badge ${j.tipo}" style="font-size:10px;">${j.tipo}</span>
+      <span>${j.dorsal ?? '-'} · ${nombreConAlias(j)}</span>
     </label>`).join('');
 
   let cuartosHtml = '';
@@ -383,6 +445,7 @@ function renderPartidoDetalle(){
     </div>
     <div class="card">
       <h3>Convocatoria</h3>
+      <button class="btn sec" style="margin-bottom:8px;" onclick="marcarTodosConvocados()">Marcar todos</button>
       <div class="fila" style="flex-direction:column;">${filasJugadores}</div>
       <div class="fila" style="margin-top:10px;">
         <div><input id="pd-temporal-nombre" placeholder="Nombre jugador temporal"></div>
@@ -410,6 +473,17 @@ async function toggleConvocado(jugadorId, marcado){
     if(error) return alert(error.message);
   } else {
     const { error } = await sb.from('alevin_d_convocatoria').delete().eq('partido_id', PARTIDO_ACTUAL).eq('jugador_id', jugadorId);
+    if(error) return alert(error.message);
+  }
+  await cargarDetallePartido(PARTIDO_ACTUAL);
+  renderPartidoDetalle();
+}
+async function marcarTodosConvocados(){
+  const yaConvocados = new Set(DETALLE.convocatoria.map(c => c.jugador_id));
+  const faltan = JUGADORES.filter(j => j.activo && !yaConvocados.has(j.id));
+  if(faltan.length){
+    const { error } = await sb.from('alevin_d_convocatoria')
+      .insert(faltan.map(j => ({ partido_id: PARTIDO_ACTUAL, jugador_id: j.id })));
     if(error) return alert(error.message);
   }
   await cargarDetallePartido(PARTIDO_ACTUAL);

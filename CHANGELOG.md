@@ -22,3 +22,10 @@ Histórico funcional del proyecto (qué cambia para el usuario, no detalles téc
 ## 2026-09-09 — Login por contraseña
 
 - Sustituido el acceso por enlace de un solo uso (que agotaba enseguida el límite de envíos de correo de Supabase, compartido con otras apps) por acceso con email y contraseña. La sesión queda guardada en el dispositivo, sin depender del correo en cada partido. Incluye un botón para crear la cuenta la primera vez.
+- Añadido botón "Cambiar contraseña" dentro de la app, para poder actualizarla sin depender de nadie más.
+
+## 2026-09-09 — Jugadores y convocatoria
+
+- Jugadores: sustituido el botón directo "Dar de baja" por "Editar", que abre un panel con nombre, alias/apodo (para reconocer variantes como "Xavi"/"Xavier" como el mismo jugador), dorsal y tipo; la baja pasa a hacerse desde ese panel y es una baja lógica (el jugador deja de aparecer en la plantilla, pero no se borra: se puede consultar en "Ver dados de baja" y reactivar). La lista principal solo muestra jugadores activos.
+- Convocatoria: al crear un partido, todos los jugadores activos quedan convocados por defecto; ahora solo hace falta desmarcar a quien falte (antes había que marcar uno a uno). Añadido botón "Marcar todos" para partidos ya creados. Quitado el distintivo "fijo/temporal" de esta lista, que no aportaba y descuadraba la vista.
+- Pendiente (a futuro, si la entrada manual resulta incómoda): reconocer la convocatoria y las alineaciones directamente a partir de la foto que envía el entrenador, como ya hace el proyecto de Fútbol Jueves Mundial.
