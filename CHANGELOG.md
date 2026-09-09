@@ -22,4 +22,3 @@ Histórico funcional del proyecto (qué cambia para el usuario, no detalles téc
 ## 2026-09-09 — Login por contraseña
 
 - Sustituido el acceso por enlace de un solo uso (que agotaba enseguida el límite de envíos de correo de Supabase, compartido con otras apps) por acceso con email y contraseña. La sesión queda guardada en el dispositivo, sin depender del correo en cada partido. Incluye un botón para crear la cuenta la primera vez.
-- Añadido botón "Cambiar contraseña" dentro de la app, para poder actualizarla sin depender de nadie más.
