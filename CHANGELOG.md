@@ -29,3 +29,11 @@ Histórico funcional del proyecto (qué cambia para el usuario, no detalles téc
 - Jugadores: sustituido el botón directo "Dar de baja" por "Editar", que abre un panel con nombre, alias/apodo (para reconocer variantes como "Xavi"/"Xavier" como el mismo jugador), dorsal y tipo; la baja pasa a hacerse desde ese panel y es una baja lógica (el jugador deja de aparecer en la plantilla, pero no se borra: se puede consultar en "Ver dados de baja" y reactivar). La lista principal solo muestra jugadores activos.
 - Convocatoria: al crear un partido, todos los jugadores activos quedan convocados por defecto; ahora solo hace falta desmarcar a quien falte (antes había que marcar uno a uno). Añadido botón "Marcar todos" para partidos ya creados. Quitado el distintivo "fijo/temporal" de esta lista, que no aportaba y descuadraba la vista.
 - Pendiente (a futuro, si la entrada manual resulta incómoda): reconocer la convocatoria y las alineaciones directamente a partir de la foto que envía el entrenador, como ya hace el proyecto de Fútbol Jueves Mundial.
+
+## 2026-09-09 — Móvil, foto de convocatoria y admin
+
+- Cabecera y formularios adaptados a móvil (antes se veían mal en pantallas estrechas).
+- Cambiar contraseña ahora pide primero la contraseña actual, por seguridad.
+- La foto de convocatoria se ve directamente en la ficha del partido en vez de solo el nombre del fichero.
+- Al crear un partido, el tipo de partido recuerda el último que usaste.
+- Nueva pantalla "Admin" para mantener catálogos (de momento, tipos de partido: añadir, renombrar y eliminar si no está en uso).
