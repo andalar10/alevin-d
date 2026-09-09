@@ -72,7 +72,8 @@
       <button id="nav-jugadores" onclick="irA('jugadores')">Jugadores</button>
       <button id="nav-partidos" onclick="irA('partidos')">Partidos</button>
       <button id="nav-libro" onclick="irA('libro')">Libro (PDF)</button>
-      <button onclick="cerrarSesion()" style="margin-left:8px;">Salir</button>
+      <button onclick="cambiarContrasena()" style="margin-left:8px;">Cambiar contraseña</button>
+      <button onclick="cerrarSesion()">Salir</button>
     </nav>
   </header>
   <main id="main"></main>
@@ -149,6 +150,14 @@ async function crearCuenta(){
   }
 }
 async function cerrarSesion(){ await sb.auth.signOut(); location.reload(); }
+async function cambiarContrasena(){
+  const nueva = prompt('Nueva contraseña (mínimo 6 caracteres):');
+  if(!nueva) return;
+  if(nueva.length < 6){ alert('Debe tener al menos 6 caracteres.'); return; }
+  const { error } = await sb.auth.updateUser({ password: nueva });
+  if(error) return alert(error.message);
+  alert('Contraseña actualizada.');
+}
 
 async function initAuth(){
   const { data:{ session } } = await sb.auth.getSession();
