@@ -47,6 +47,15 @@
   .muted{color:#777;font-size:13px;}
   .volver{background:none;border:none;color:var(--azul);cursor:pointer;font-size:14px;margin-bottom:10px;padding:0;}
   .tabla-wrap{overflow-x:auto;}
+  .spinner{display:inline-block;width:12px;height:12px;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;animation:girar .6s linear infinite;vertical-align:middle;margin-right:6px;opacity:.85;}
+  @keyframes girar{to{transform:rotate(360deg);}}
+  .campo{background:linear-gradient(#1f8a3d,#166b30);border-radius:8px;padding:10px 6px;margin-bottom:10px;}
+  .campo-linea{display:flex;flex-direction:row-reverse;gap:6px;justify-content:center;flex-wrap:wrap;padding:6px 0;}
+  .campo-jugador{background:rgba(255,255,255,.92);border:1px solid var(--azul);border-radius:6px;padding:3px 6px;font-size:12px;text-align:center;min-width:56px;}
+  .campo-jugador .cod{font-weight:600;}
+  .campo-jugador .nom{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:78px;margin:0 auto;}
+  .gol-rapido{background:none;border:none;color:var(--verde);cursor:pointer;font-weight:bold;font-size:12px;padding:0 2px;}
+  .resultado-total{font-size:20px;font-weight:700;margin:4px 0;}
 
   @media (max-width: 600px){
     header{flex-direction:column;align-items:stretch;padding:10px 12px;}
@@ -73,8 +82,8 @@
     <label style="margin-top:8px;">Contraseña</label>
     <input id="auth-password" type="password" placeholder="••••••••">
     <div style="height:10px;"></div>
-    <button class="btn" onclick="entrar()">Entrar</button>
-    <button class="btn sec" onclick="crearCuenta()">Crear cuenta (solo la primera vez)</button>
+    <button class="btn" onclick="entrar(this)">Entrar</button>
+    <button class="btn sec" onclick="crearCuenta(this)">Crear cuenta (solo la primera vez)</button>
     <p class="muted">La sesión se mantiene guardada en este dispositivo — no hace falta volver a entrar cada partido.</p>
   </div>
 </div>
@@ -86,9 +95,9 @@
       <button id="nav-jugadores" onclick="irA('jugadores')">Jugadores</button>
       <button id="nav-partidos" onclick="irA('partidos')">Partidos</button>
       <button id="nav-libro" onclick="irA('libro')">Libro (PDF)</button>
+      <button id="nav-actual" onclick="irAPartidoActual()" class="oculto">⚡ Partido actual</button>
       <button id="nav-admin" onclick="irA('admin')">Admin</button>
-      <button onclick="cambiarContrasena()" style="margin-left:8px;">Cambiar contraseña</button>
-      <button onclick="cerrarSesion()">Salir</button>
+      <button onclick="cerrarSesion()" style="margin-left:8px;">Salir</button>
     </nav>
   </header>
   <main id="main"></main>
@@ -134,35 +143,79 @@ function calcularCodigos(linea, n){
 let SESSION = null;
 let JUGADORES = [];
 let TIPOS_PARTIDO = [];
+let TIPOS_JUGADOR = [];
 let PARTIDOS = [];
 let VISTA = 'jugadores';
 let PARTIDO_ACTUAL = null; // id del partido abierto en detalle
+let RESUMEN_CUARTOS_POR_PARTIDO = {}; // { [partido_id]: {ge, gr, tiene} } — para el listado de partidos
+
+/* ============================================================
+   SPINNER genérico para botones de guardar/crear/eliminar
+   ============================================================ */
+async function conSpinner(boton, textoCargando, fn){
+  if(!boton){ return await fn(); }
+  const original = boton.innerHTML;
+  boton.disabled = true;
+  boton.innerHTML = `<span class="spinner"></span>${textoCargando}`;
+  try {
+    return await fn();
+  } finally {
+    boton.disabled = false;
+    boton.innerHTML = original;
+  }
+}
+
+/* ============================================================
+   PERSISTENCIA DE NAVEGACIÓN — recordar la última pantalla y el
+   último partido abierto, para no volver siempre a "Jugadores"
+   tras recargar, y para el acceso directo "Partido actual".
+   ============================================================ */
+function guardarVista(vista){ try{ localStorage.setItem('alevin_d_vista', vista); }catch(e){} }
+function leerVistaGuardada(){ try{ return localStorage.getItem('alevin_d_vista'); }catch(e){ return null; } }
+function guardarPartidoActualId(id){ try{ localStorage.setItem('alevin_d_partido_actual_id', id); }catch(e){} }
+function leerPartidoActualId(){ try{ return localStorage.getItem('alevin_d_partido_actual_id'); }catch(e){ return null; } }
+function actualizarBotonPartidoActual(){
+  const btn = document.getElementById('nav-actual');
+  if(!btn) return;
+  const id = leerPartidoActualId();
+  const existe = !!(id && PARTIDOS.some(p => p.id === id));
+  btn.classList.toggle('oculto', !existe);
+  btn.classList.toggle('activo', existe && PARTIDO_ACTUAL === id);
+}
+function irAPartidoActual(){
+  const id = leerPartidoActualId();
+  if(id) abrirPartido(id);
+}
 
 /* ============================================================
    AUTENTICACIÓN
    ============================================================ */
-async function entrar(){
+async function entrar(boton){
   const email = document.getElementById('auth-email').value.trim();
   const password = document.getElementById('auth-password').value;
   const msg = document.getElementById('auth-msg');
   if(!email || !password){ msg.innerHTML = '<div class="aviso">Introduce email y contraseña.</div>'; return; }
-  const { error } = await sb.auth.signInWithPassword({ email, password });
-  if(error){ msg.innerHTML = `<div class="aviso">${error.message}</div>`; return; }
-  msg.innerHTML = '';
+  await conSpinner(boton, 'Entrando…', async () => {
+    const { error } = await sb.auth.signInWithPassword({ email, password });
+    if(error){ msg.innerHTML = `<div class="aviso">${error.message}</div>`; return; }
+    msg.innerHTML = '';
+  });
 }
-async function crearCuenta(){
+async function crearCuenta(boton){
   const email = document.getElementById('auth-email').value.trim();
   const password = document.getElementById('auth-password').value;
   const msg = document.getElementById('auth-msg');
   if(!email || !password){ msg.innerHTML = '<div class="aviso">Introduce email y contraseña.</div>'; return; }
   if(password.length < 6){ msg.innerHTML = '<div class="aviso">La contraseña debe tener al menos 6 caracteres.</div>'; return; }
-  const { data, error } = await sb.auth.signUp({ email, password });
-  if(error){ msg.innerHTML = `<div class="aviso">${error.message}</div>`; return; }
-  if(data.session){
-    msg.innerHTML = '<div class="ok">Cuenta creada y sesión iniciada.</div>';
-  } else {
-    msg.innerHTML = '<div class="aviso">Cuenta creada, pero Supabase pide confirmar el email antes de poder entrar. Si no quieres depender del correo, desactiva "Confirm email" en Authentication → Providers → Email del dashboard de Supabase, y vuelve a intentarlo.</div>';
-  }
+  await conSpinner(boton, 'Creando…', async () => {
+    const { data, error } = await sb.auth.signUp({ email, password });
+    if(error){ msg.innerHTML = `<div class="aviso">${error.message}</div>`; return; }
+    if(data.session){
+      msg.innerHTML = '<div class="ok">Cuenta creada y sesión iniciada.</div>';
+    } else {
+      msg.innerHTML = '<div class="aviso">Cuenta creada, pero Supabase pide confirmar el email antes de poder entrar. Si no quieres depender del correo, desactiva "Confirm email" en Authentication → Providers → Email del dashboard de Supabase, y vuelve a intentarlo.</div>';
+    }
+  });
 }
 async function cerrarSesion(){ await sb.auth.signOut(); location.reload(); }
 async function cambiarContrasena(){
@@ -200,8 +253,19 @@ function pintarAuth(){
    CARGA DE DATOS
    ============================================================ */
 async function cargarTodo(){
-  await Promise.all([cargarJugadores(), cargarTiposPartido(), cargarPartidos()]);
-  irA(VISTA);
+  await Promise.all([cargarTiposJugador(), cargarTiposPartido()]);
+  await cargarJugadores();
+  await cargarPartidos();
+  actualizarBotonPartidoActual();
+  const vistaGuardada = leerVistaGuardada();
+  const partidoGuardado = leerPartidoActualId();
+  if(vistaGuardada === 'partido-detalle' && partidoGuardado && PARTIDOS.some(p => p.id === partidoGuardado)){
+    await abrirPartido(partidoGuardado);
+  } else if(vistaGuardada && ['jugadores','partidos','libro','admin'].includes(vistaGuardada)){
+    irA(vistaGuardada);
+  } else {
+    irA(VISTA);
+  }
 }
 async function cargarJugadores(){
   const { data, error } = await sb.from('alevin_d_jugadores').select('*').order('activo',{ascending:false}).order('dorsal');
@@ -211,9 +275,31 @@ async function cargarTiposPartido(){
   const { data, error } = await sb.from('alevin_d_tipos_partido').select('*').order('id');
   if(!error) TIPOS_PARTIDO = data;
 }
+async function cargarTiposJugador(){
+  const { data, error } = await sb.from('alevin_d_tipos_jugador').select('*').order('id');
+  if(!error) TIPOS_JUGADOR = data;
+}
+function nombreTipoJugador(j){
+  return TIPOS_JUGADOR.find(t => t.id === j.tipo_jugador_id)?.nombre ?? '?';
+}
+function idTipoJugadorFijo(){
+  return TIPOS_JUGADOR.find(t => t.nombre === 'Fijo')?.id;
+}
+function idTipoJugadorTemporal(){
+  return TIPOS_JUGADOR.find(t => t.nombre === 'Temporal')?.id;
+}
 async function cargarPartidos(){
   const { data, error } = await sb.from('alevin_d_partidos').select('*, alevin_d_tipos_partido(nombre)').order('fecha',{ascending:false});
   if(!error) PARTIDOS = data;
+  const { data: cuartosResumen } = await sb.from('alevin_d_cuartos').select('partido_id, goles_equipo, goles_rival');
+  RESUMEN_CUARTOS_POR_PARTIDO = {};
+  (cuartosResumen || []).forEach(c => {
+    if(!RESUMEN_CUARTOS_POR_PARTIDO[c.partido_id]) RESUMEN_CUARTOS_POR_PARTIDO[c.partido_id] = { ge:0, gr:0, tiene:false };
+    const r = RESUMEN_CUARTOS_POR_PARTIDO[c.partido_id];
+    if(c.goles_equipo != null){ r.ge += c.goles_equipo; r.tiene = true; }
+    if(c.goles_rival != null){ r.gr += c.goles_rival; r.tiene = true; }
+  });
+  actualizarBotonPartidoActual();
 }
 
 /* ============================================================
@@ -222,6 +308,7 @@ async function cargarPartidos(){
 function irA(vista){
   VISTA = vista;
   PARTIDO_ACTUAL = null;
+  guardarVista(vista);
   ['jugadores','partidos','libro','admin'].forEach(v => {
     document.getElementById('nav-'+v).classList.toggle('activo', v === vista);
   });
@@ -229,6 +316,7 @@ function irA(vista){
   if(vista === 'partidos') renderPartidos();
   if(vista === 'libro') renderLibro();
   if(vista === 'admin') renderAdmin();
+  actualizarBotonPartidoActual();
 }
 
 /* ============================================================
@@ -240,11 +328,15 @@ let VER_BAJAS = false;
 function nombreConAlias(j){
   return j.alias ? `${j.nombre} <span class="muted">(${j.alias})</span>` : j.nombre;
 }
+function opcionesTiposJugador(seleccionadoId){
+  return TIPOS_JUGADOR.map(t => `<option value="${t.id}" ${t.id===seleccionadoId?'selected':''}>${t.nombre}</option>`).join('');
+}
 function renderJugadores(){
   const main = document.getElementById('main');
   const lista = JUGADORES.filter(j => VER_BAJAS ? !j.activo : j.activo);
   const filas = lista.map(j => {
     const editando = JUGADOR_EN_EDICION === j.id;
+    const tipoNombre = nombreTipoJugador(j);
     if(editando){
       return `
         <tr>
@@ -254,10 +346,7 @@ function renderJugadores(){
               <div><label>Alias / apodo</label><input id="ej-alias-${j.id}" value="${j.alias ?? ''}" placeholder="p.ej. Xavi"></div>
               <div><label>Dorsal</label><input id="ej-dorsal-${j.id}" type="number" value="${j.dorsal ?? ''}"></div>
               <div><label>Tipo</label>
-                <select id="ej-tipo-${j.id}">
-                  <option value="fijo" ${j.tipo==='fijo'?'selected':''}>Fijo (plantilla habitual)</option>
-                  <option value="temporal" ${j.tipo==='temporal'?'selected':''}>Temporal (viene puntualmente)</option>
-                </select>
+                <select id="ej-tipo-${j.id}">${opcionesTiposJugador(j.tipo_jugador_id)}</select>
               </div>
             </div>
             <button class="btn" onclick="guardarEdicionJugador('${j.id}')">Guardar</button>
@@ -269,7 +358,7 @@ function renderJugadores(){
     return `
       <tr>
         <td>${j.dorsal ?? '-'}</td>
-        <td>${nombreConAlias(j)}</td>
+        <td>${nombreConAlias(j)} ${tipoNombre !== 'Fijo' ? `<span class="badge">${tipoNombre}</span>` : ''}</td>
         <td><button class="btn sec" onclick="JUGADOR_EN_EDICION='${j.id}'; renderJugadores();">Editar</button></td>
       </tr>`;
   }).join('');
@@ -280,10 +369,7 @@ function renderJugadores(){
         <div><label>Nombre</label><input id="nj-nombre"></div>
         <div><label>Dorsal</label><input id="nj-dorsal" type="number"></div>
         <div><label>Tipo</label>
-          <select id="nj-tipo">
-            <option value="fijo">Fijo (plantilla habitual)</option>
-            <option value="temporal">Temporal (viene puntualmente)</option>
-          </select>
+          <select id="nj-tipo">${opcionesTiposJugador(idTipoJugadorFijo())}</select>
         </div>
       </div>
       <button class="btn" onclick="crearJugador()">Añadir</button>
@@ -300,10 +386,10 @@ function renderJugadores(){
 async function crearJugador(){
   const nombre = document.getElementById('nj-nombre').value.trim();
   const dorsalRaw = document.getElementById('nj-dorsal').value;
-  const tipo = document.getElementById('nj-tipo').value;
+  const tipo_jugador_id = parseInt(document.getElementById('nj-tipo').value);
   if(!nombre) return alert('Falta el nombre');
   const { error } = await sb.from('alevin_d_jugadores').insert({
-    nombre, dorsal: dorsalRaw ? parseInt(dorsalRaw) : null, tipo
+    nombre, dorsal: dorsalRaw ? parseInt(dorsalRaw) : null, tipo_jugador_id
   });
   if(error) return alert(error.message);
   await cargarJugadores();
@@ -313,10 +399,10 @@ async function guardarEdicionJugador(id){
   const nombre = document.getElementById(`ej-nombre-${id}`).value.trim();
   const alias = document.getElementById(`ej-alias-${id}`).value.trim();
   const dorsalRaw = document.getElementById(`ej-dorsal-${id}`).value;
-  const tipo = document.getElementById(`ej-tipo-${id}`).value;
+  const tipo_jugador_id = parseInt(document.getElementById(`ej-tipo-${id}`).value);
   if(!nombre) return alert('Falta el nombre');
   const { error } = await sb.from('alevin_d_jugadores').update({
-    nombre, alias: alias || null, dorsal: dorsalRaw ? parseInt(dorsalRaw) : null, tipo
+    nombre, alias: alias || null, dorsal: dorsalRaw ? parseInt(dorsalRaw) : null, tipo_jugador_id
   }).eq('id', id);
   if(error) return alert(error.message);
   JUGADOR_EN_EDICION = null;
@@ -339,13 +425,23 @@ function renderPartidos(){
   const main = document.getElementById('main');
   const ultimoTipo = leerUltimoTipoPartido();
   const opcionesTipo = TIPOS_PARTIDO.map(t => `<option value="${t.id}" ${String(t.id)===ultimoTipo?'selected':''}>${t.nombre}</option>`).join('');
-  const items = PARTIDOS.map(p => `
-    <div class="partido-item" onclick="abrirPartido('${p.id}')">
+  const items = PARTIDOS.map(p => {
+    const resumen = RESUMEN_CUARTOS_POR_PARTIDO[p.id];
+    let resultadoHtml = '';
+    if(p.goles_favor!=null && p.goles_contra!=null){
+      resultadoHtml = `<span class="muted"> · Resultado: ${p.goles_favor} - ${p.goles_contra}</span>`;
+    } else if(resumen && resumen.tiene){
+      resultadoHtml = `<span class="muted"> · Parcial (cuartos): ${resumen.ge} - ${resumen.gr}</span>`;
+    }
+    const destacado = leerPartidoActualId() === p.id ? 'style="border-left:3px solid var(--azul);padding-left:9px;"' : '';
+    return `
+    <div class="partido-item" ${destacado} onclick="abrirPartido('${p.id}')">
       <strong>${p.rival}</strong>
       <span class="badge ${ (p.alevin_d_tipos_partido?.nombre||'').toLowerCase() }">${p.alevin_d_tipos_partido?.nombre ?? ''}</span>
       — ${p.fecha}${p.hora ? ' · '+p.hora : ''} ${p.condicion ? '('+p.condicion+')' : ''}
-      ${ (p.goles_favor!=null && p.goles_contra!=null) ? `<span class="muted"> · Resultado: ${p.goles_favor} - ${p.goles_contra}</span>` : '' }
-    </div>`).join('') || '<p class="muted">Aún no hay partidos.</p>';
+      ${resultadoHtml}
+    </div>`;
+  }).join('') || '<p class="muted">Aún no hay partidos.</p>';
   main.innerHTML = `
     <div class="card">
       <h2>Nuevo partido</h2>
@@ -365,7 +461,7 @@ function renderPartidos(){
           <button class="btn sec" onclick="nuevoTipoPartido()" type="button">+ Nuevo tipo</button>
         </div>
       </div>
-      <button class="btn" onclick="crearPartido()">Crear partido</button>
+      <button class="btn" onclick="crearPartido(this)">Crear partido</button>
     </div>
     <div class="card">
       <h2>Partidos</h2>
@@ -380,26 +476,30 @@ async function nuevoTipoPartido(){
   await cargarTiposPartido();
   renderPartidos();
 }
-async function crearPartido(){
+async function crearPartido(boton){
   const rival = document.getElementById('np-rival').value.trim();
   const fecha = document.getElementById('np-fecha').value;
   const hora = document.getElementById('np-hora').value || null;
   const condicion = document.getElementById('np-condicion').value;
   const tipo_partido_id = parseInt(document.getElementById('np-tipo').value);
   if(!rival || !fecha) return alert('Rival y fecha son obligatorios');
-  const { data, error } = await sb.from('alevin_d_partidos')
-    .insert({ rival, fecha, hora, condicion, tipo_partido_id }).select().single();
-  if(error) return alert(error.message);
-  guardarUltimoTipoPartido(tipo_partido_id);
-  // Convocatoria por defecto: todos los jugadores activos, se desmarcan los que falten
-  const activos = JUGADORES.filter(j => j.activo);
-  if(activos.length){
-    const { error: e2 } = await sb.from('alevin_d_convocatoria')
-      .insert(activos.map(j => ({ partido_id: data.id, jugador_id: j.id })));
-    if(e2) return alert(e2.message);
-  }
-  await cargarPartidos();
-  abrirPartido(data.id);
+  await conSpinner(boton, 'Creando…', async () => {
+    const { data, error } = await sb.from('alevin_d_partidos')
+      .insert({ rival, fecha, hora, condicion, tipo_partido_id }).select().single();
+    if(error) return alert(error.message);
+    guardarUltimoTipoPartido(tipo_partido_id);
+    // Convocatoria por defecto: solo los jugadores fijos activos (los temporales
+    // se añaden y marcan a mano en cada partido). Se desmarcan los que falten.
+    const idFijo = idTipoJugadorFijo();
+    const activosFijos = JUGADORES.filter(j => j.activo && j.tipo_jugador_id === idFijo);
+    if(activosFijos.length){
+      const { error: e2 } = await sb.from('alevin_d_convocatoria')
+        .insert(activosFijos.map(j => ({ partido_id: data.id, jugador_id: j.id })));
+      if(e2) return alert(e2.message);
+    }
+    await cargarPartidos();
+    await abrirPartido(data.id);
+  });
 }
 
 /* ============================================================
@@ -409,29 +509,50 @@ let DETALLE = null; // { partido, convocatoria:[{jugador_id,dorsal_partido,jugad
 
 async function abrirPartido(id){
   PARTIDO_ACTUAL = id;
-  await cargarDetallePartido(id);
+  guardarPartidoActualId(id);
+  guardarVista('partido-detalle');
   VISTA = 'partidos';
   document.getElementById('nav-partidos').classList.add('activo');
   document.getElementById('nav-jugadores').classList.remove('activo');
   document.getElementById('nav-libro').classList.remove('activo');
+  actualizarBotonPartidoActual();
+  DETALLE = null;
+  renderPartidoDetalle(); // muestra "Cargando…" mientras llegan los datos
+  await cargarDetallePartido(id);
   renderPartidoDetalle();
 }
 async function cargarDetallePartido(id){
-  const partido = PARTIDOS.find(p => p.id === id) || (await sb.from('alevin_d_partidos').select('*, alevin_d_tipos_partido(nombre)').eq('id', id).single()).data;
-  const { data: conv } = await sb.from('alevin_d_convocatoria').select('*, alevin_d_jugadores(*)').eq('partido_id', id);
-  const { data: cuartosRows } = await sb.from('alevin_d_cuartos').select('*').eq('partido_id', id).order('numero');
+  // Todo en paralelo (antes se pedía 1 fila por cuarto en serie: hasta 9
+  // idas y vueltas seguidas — esto era la causa de la lentitud al abrir un partido).
+  const partidoLocal = PARTIDOS.find(p => p.id === id);
+  const [partidoRes, convRes, cuartosRes] = await Promise.all([
+    partidoLocal ? Promise.resolve({ data: partidoLocal }) : sb.from('alevin_d_partidos').select('*, alevin_d_tipos_partido(nombre)').eq('id', id).single(),
+    sb.from('alevin_d_convocatoria').select('*, alevin_d_jugadores(*)').eq('partido_id', id),
+    sb.from('alevin_d_cuartos').select('*').eq('partido_id', id).order('numero')
+  ]);
+  const partido = partidoRes.data;
+  const conv = convRes.data;
+  const cuartosRows = cuartosRes.data || [];
+  const idsCuartos = cuartosRows.map(c => c.id);
+
+  let alineacionesTodas = [], golesTodos = [];
+  if(idsCuartos.length){
+    const [alRes, glRes] = await Promise.all([
+      sb.from('alevin_d_alineacion_cuarto').select('*, alevin_d_jugadores(nombre)').in('cuarto_id', idsCuartos),
+      sb.from('alevin_d_goles').select('*, autor:alevin_d_jugadores!alevin_d_goles_jugador_id_fkey(nombre), asistente:alevin_d_jugadores!alevin_d_goles_asistente_id_fkey(nombre)').in('cuarto_id', idsCuartos)
+    ]);
+    alineacionesTodas = alRes.data || [];
+    golesTodos = glRes.data || [];
+  }
+
   const cuartos = {};
   for (let n=1; n<=4; n++){
-    const row = (cuartosRows||[]).find(c => c.numero === n);
-    let alineacion = [];
-    let goles = [];
-    if(row){
-      const { data: al } = await sb.from('alevin_d_alineacion_cuarto').select('*, alevin_d_jugadores(nombre)').eq('cuarto_id', row.id);
-      alineacion = al || [];
-      const { data: gl } = await sb.from('alevin_d_goles').select('*, autor:alevin_d_jugadores!alevin_d_goles_jugador_id_fkey(nombre), asistente:alevin_d_jugadores!alevin_d_goles_asistente_id_fkey(nombre)').eq('cuarto_id', row.id);
-      goles = gl || [];
-    }
-    cuartos[n] = { row, alineacion, goles };
+    const row = cuartosRows.find(c => c.numero === n);
+    cuartos[n] = {
+      row,
+      alineacion: row ? alineacionesTodas.filter(a => a.cuarto_id === row.id) : [],
+      goles: row ? golesTodos.filter(g => g.cuarto_id === row.id) : []
+    };
   }
   let fotoUrl = null;
   if(partido && partido.foto_convocatoria_path){
@@ -442,13 +563,26 @@ async function cargarDetallePartido(id){
 }
 function jugadorPorId(id){ return JUGADORES.find(j => j.id === id); }
 
+function totalCuartos(){
+  let ge = 0, gr = 0, tiene = false;
+  for(let n=1; n<=4; n++){
+    const row = DETALLE.cuartos[n].row;
+    if(row){
+      if(row.goles_equipo != null){ ge += row.goles_equipo; tiene = true; }
+      if(row.goles_rival != null){ gr += row.goles_rival; tiene = true; }
+    }
+  }
+  return tiene ? { ge, gr } : null;
+}
 function renderPartidoDetalle(){
   const main = document.getElementById('main');
   if(!DETALLE){ main.innerHTML = '<p class="muted">Cargando…</p>'; return; }
   const p = DETALLE.partido;
   const convocados = new Set(DETALLE.convocatoria.map(c => c.jugador_id));
-  const filasJugadores = JUGADORES.filter(j => j.activo || convocados.has(j.id)).map(j => `
-    <label style="display:flex;align-items:center;gap:8px;font-weight:normal;padding:4px 0;">
+  const activos = JUGADORES.filter(j => j.activo || convocados.has(j.id));
+  const todosMarcados = activos.length > 0 && activos.every(j => convocados.has(j.id));
+  const filasJugadores = activos.map(j => `
+    <label style="display:flex;align-items:center;gap:8px;font-weight:normal;padding:5px 8px;border:1px solid var(--borde);border-radius:6px;background:${convocados.has(j.id)?'#eff6ff':'#fff'};">
       <input type="checkbox" ${convocados.has(j.id)?'checked':''} onchange="toggleConvocado('${j.id}', this.checked)">
       <span>${j.dorsal ?? '-'} · ${nombreConAlias(j)}</span>
     </label>`).join('');
@@ -456,43 +590,68 @@ function renderPartidoDetalle(){
   let cuartosHtml = '';
   for(let n=1; n<=4; n++) cuartosHtml += renderCuarto(n);
 
+  const total = totalCuartos();
+  const totalHtml = total
+    ? `<p class="resultado-total">⚽ ${total.ge} - ${total.gr} <span class="muted" style="font-size:13px;font-weight:400;">(suma de cuartos)</span></p>`
+    : '';
+
   main.innerHTML = `
     <button class="volver" onclick="irA('partidos')">← Volver a partidos</button>
     <div class="card">
-      <h2>${p.rival} — ${p.fecha}</h2>
-      <p class="muted">${p.alevin_d_tipos_partido?.nombre ?? ''} · ${p.condicion ?? ''} ${p.hora ? '· '+p.hora : ''}</p>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;">
+        <div>
+          <h2 style="margin-bottom:2px;">${p.rival} — ${p.fecha}</h2>
+          <p class="muted" style="margin-top:0;">${p.alevin_d_tipos_partido?.nombre ?? ''} · ${p.condicion ?? ''} ${p.hora ? '· '+p.hora : ''}</p>
+          ${totalHtml}
+        </div>
+        <button class="btn danger" onclick="eliminarPartido(this)">Eliminar partido</button>
+      </div>
       <div class="fila">
-        <div><label>Goles a favor</label><input id="pd-gf" type="number" value="${p.goles_favor ?? ''}"></div>
-        <div><label>Goles en contra</label><input id="pd-gc" type="number" value="${p.goles_contra ?? ''}"></div>
-        <div style="align-self:flex-end;"><button class="btn sec" onclick="guardarResultadoFinal()">Guardar resultado</button></div>
+        <div><label>Goles a favor (resultado oficial)</label><input id="pd-gf" type="number" value="${p.goles_favor ?? ''}"></div>
+        <div><label>Goles en contra (resultado oficial)</label><input id="pd-gc" type="number" value="${p.goles_contra ?? ''}"></div>
+        <div style="align-self:flex-end;"><button class="btn sec" onclick="guardarResultadoFinal(this)">Guardar resultado</button></div>
       </div>
       <h3>Foto de convocatoria</h3>
       <input type="file" id="pd-foto" accept="image/*" onchange="subirFotoConvocatoria(this.files[0])">
+      <p id="pd-foto-estado" class="muted"></p>
       ${DETALLE.fotoUrl ? `<p><img src="${DETALLE.fotoUrl}" alt="Foto de convocatoria" style="max-width:100%;border-radius:6px;margin-top:8px;"></p>` : ''}
     </div>
     <div class="card">
       <h3>Convocatoria</h3>
-      <button class="btn sec" style="margin-bottom:8px;" onclick="marcarTodosConvocados()">Marcar todos</button>
-      <div class="fila" style="flex-direction:column;">${filasJugadores}</div>
+      <button class="btn sec" style="margin-bottom:8px;" onclick="toggleTodosConvocados(${todosMarcados}, this)">${todosMarcados ? 'Desmarcar todos' : 'Marcar todos'}</button>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:6px;">${filasJugadores}</div>
       <div class="fila" style="margin-top:10px;">
         <div><input id="pd-temporal-nombre" placeholder="Nombre jugador temporal"></div>
         <div><input id="pd-temporal-dorsal" type="number" placeholder="Dorsal (opcional)"></div>
-        <div><button class="btn sec" onclick="anadirTemporalYConvocar()">+ Añadir temporal y convocar</button></div>
+        <div><button class="btn sec" onclick="anadirTemporalYConvocar(this)">+ Añadir temporal y convocar</button></div>
       </div>
     </div>
     ${cuartosHtml}
   `;
 }
-async function guardarResultadoFinal(){
+async function eliminarPartido(boton){
+  if(!confirm(`¿Eliminar el partido contra ${DETALLE.partido.rival} (${DETALLE.partido.fecha})? Se borrarán también sus cuartos, alineaciones y goles. Esta acción no se puede deshacer.`)) return;
+  await conSpinner(boton, 'Eliminando…', async () => {
+    const { error } = await sb.from('alevin_d_partidos').delete().eq('id', PARTIDO_ACTUAL);
+    if(error) return alert(error.message);
+    if(leerPartidoActualId() === PARTIDO_ACTUAL){
+      try{ localStorage.removeItem('alevin_d_partido_actual_id'); }catch(e){}
+    }
+    await cargarPartidos();
+    irA('partidos');
+  });
+}
+async function guardarResultadoFinal(boton){
   const gf = document.getElementById('pd-gf').value;
   const gc = document.getElementById('pd-gc').value;
-  const { error } = await sb.from('alevin_d_partidos').update({
-    goles_favor: gf === '' ? null : parseInt(gf),
-    goles_contra: gc === '' ? null : parseInt(gc)
-  }).eq('id', PARTIDO_ACTUAL);
-  if(error) return alert(error.message);
-  await cargarPartidos();
-  alert('Resultado guardado');
+  await conSpinner(boton, 'Guardando…', async () => {
+    const { error } = await sb.from('alevin_d_partidos').update({
+      goles_favor: gf === '' ? null : parseInt(gf),
+      goles_contra: gc === '' ? null : parseInt(gc)
+    }).eq('id', PARTIDO_ACTUAL);
+    if(error) return alert(error.message);
+    await cargarPartidos();
+  });
 }
 async function toggleConvocado(jugadorId, marcado){
   if(marcado){
@@ -505,37 +664,50 @@ async function toggleConvocado(jugadorId, marcado){
   await cargarDetallePartido(PARTIDO_ACTUAL);
   renderPartidoDetalle();
 }
-async function marcarTodosConvocados(){
-  const yaConvocados = new Set(DETALLE.convocatoria.map(c => c.jugador_id));
-  const faltan = JUGADORES.filter(j => j.activo && !yaConvocados.has(j.id));
-  if(faltan.length){
-    const { error } = await sb.from('alevin_d_convocatoria')
-      .insert(faltan.map(j => ({ partido_id: PARTIDO_ACTUAL, jugador_id: j.id })));
-    if(error) return alert(error.message);
-  }
-  await cargarDetallePartido(PARTIDO_ACTUAL);
-  renderPartidoDetalle();
+async function toggleTodosConvocados(desmarcar, boton){
+  await conSpinner(boton, '…', async () => {
+    if(desmarcar){
+      const { error } = await sb.from('alevin_d_convocatoria').delete().eq('partido_id', PARTIDO_ACTUAL);
+      if(error) return alert(error.message);
+    } else {
+      const yaConvocados = new Set(DETALLE.convocatoria.map(c => c.jugador_id));
+      const faltan = JUGADORES.filter(j => j.activo && !yaConvocados.has(j.id));
+      if(faltan.length){
+        const { error } = await sb.from('alevin_d_convocatoria')
+          .insert(faltan.map(j => ({ partido_id: PARTIDO_ACTUAL, jugador_id: j.id })));
+        if(error) return alert(error.message);
+      }
+    }
+    await cargarDetallePartido(PARTIDO_ACTUAL);
+    renderPartidoDetalle();
+  });
 }
-async function anadirTemporalYConvocar(){
+async function anadirTemporalYConvocar(boton){
   const nombre = document.getElementById('pd-temporal-nombre').value.trim();
   const dorsalRaw = document.getElementById('pd-temporal-dorsal').value;
   if(!nombre) return alert('Falta el nombre');
-  const { data, error } = await sb.from('alevin_d_jugadores').insert({ nombre, tipo:'temporal', dorsal: dorsalRaw?parseInt(dorsalRaw):null }).select().single();
-  if(error) return alert(error.message);
-  await cargarJugadores();
-  const { error: e2 } = await sb.from('alevin_d_convocatoria').insert({ partido_id: PARTIDO_ACTUAL, jugador_id: data.id, dorsal_partido: dorsalRaw?parseInt(dorsalRaw):null });
-  if(e2) return alert(e2.message);
-  await cargarDetallePartido(PARTIDO_ACTUAL);
-  renderPartidoDetalle();
+  await conSpinner(boton, 'Añadiendo…', async () => {
+    const { data, error } = await sb.from('alevin_d_jugadores').insert({
+      nombre, tipo_jugador_id: idTipoJugadorTemporal(), dorsal: dorsalRaw?parseInt(dorsalRaw):null
+    }).select().single();
+    if(error) return alert(error.message);
+    await cargarJugadores();
+    const { error: e2 } = await sb.from('alevin_d_convocatoria').insert({ partido_id: PARTIDO_ACTUAL, jugador_id: data.id, dorsal_partido: dorsalRaw?parseInt(dorsalRaw):null });
+    if(e2) return alert(e2.message);
+    await cargarDetallePartido(PARTIDO_ACTUAL);
+    renderPartidoDetalle();
+  });
 }
 async function subirFotoConvocatoria(file){
   if(!file) return;
+  const estado = document.getElementById('pd-foto-estado');
+  if(estado) estado.innerHTML = '<span class="spinner" style="border-color:#777;"></span>Subiendo foto…';
   const ext = file.name.split('.').pop();
   const path = `${PARTIDO_ACTUAL}/convocatoria.${ext}`;
   const { error } = await sb.storage.from('alevin-d-fotos').upload(path, file, { upsert: true });
-  if(error) return alert(error.message);
+  if(error){ if(estado) estado.textContent = ''; return alert(error.message); }
   const { error: e2 } = await sb.from('alevin_d_partidos').update({ foto_convocatoria_path: path }).eq('id', PARTIDO_ACTUAL);
-  if(e2) return alert(e2.message);
+  if(e2){ if(estado) estado.textContent = ''; return alert(e2.message); }
   await cargarPartidos();
   await cargarDetallePartido(PARTIDO_ACTUAL);
   renderPartidoDetalle();
@@ -559,11 +731,81 @@ function iniciarEdicionCuarto(n){
   });
   EDICION_CUARTO[n] = porLinea;
 }
+let CUARTOS_ABIERTOS = new Set();
+// Cuartos cuya alineación ya guardada se está reeditando (si no está aquí y
+// ya tiene alineación guardada, se muestra la vista de campo en vez del editor).
+let EDITANDO_CUARTO = new Set();
+
 function renderCuarto(n){
-  iniciarEdicionCuarto(n);
+  const c = DETALLE.cuartos[n];
+  const tieneAlineacion = (c.alineacion || []).length > 0;
+  const editando = EDITANDO_CUARTO.has(n) || !tieneAlineacion;
+  if(editando) iniciarEdicionCuarto(n);
+
+  const resumen = c.row
+    ? `${(c.row.goles_equipo ?? '?')} - ${(c.row.goles_rival ?? '?')} · ${c.goles.length} gol(es)`
+    : 'sin datos guardados';
+
+  const cuerpoAlineacion = editando ? renderEditorLineasCuarto(n) : renderCampoCuarto(n);
+  const golesHtml = renderGolesCuarto(n);
+
+  return `
+    <details class="card" style="padding:0;" ${CUARTOS_ABIERTOS.has(n) ? 'open' : ''} ontoggle="if(this.open) CUARTOS_ABIERTOS.add(${n}); else CUARTOS_ABIERTOS.delete(${n});">
+      <summary style="cursor:pointer;padding:16px;font-weight:600;font-size:15px;">Cuarto ${n} <span class="muted" style="font-weight:normal;">— ${resumen}</span></summary>
+      <div style="padding:0 16px 16px;">
+        <div class="fila">
+          <div><label>Goles equipo</label>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <input id="cq-ge-${n}" type="number" value="${c.row?.goles_equipo ?? ''}" style="flex:1;">
+              <button type="button" class="btn sec" onclick="incrementarMarcador(${n}, 'goles_equipo', 1)">+1</button>
+              <button type="button" class="btn sec" onclick="incrementarMarcador(${n}, 'goles_equipo', -1)">-1</button>
+            </div>
+          </div>
+          <div><label>Goles rival</label>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <input id="cq-gr-${n}" type="number" value="${c.row?.goles_rival ?? ''}" style="flex:1;">
+              <button type="button" class="btn sec" onclick="incrementarMarcador(${n}, 'goles_rival', 1)">+1</button>
+              <button type="button" class="btn sec" onclick="incrementarMarcador(${n}, 'goles_rival', -1)">-1</button>
+            </div>
+          </div>
+        </div>
+        <h4 style="margin-bottom:4px;">Alineación</h4>
+        ${cuerpoAlineacion}
+        ${golesHtml}
+      </div>
+    </details>`;
+}
+
+// Vista de campo: solo lectura, para cuando la alineación de ese cuarto ya
+// está guardada — con botón de gol rápido junto a cada jugador.
+function renderCampoCuarto(n){
+  const c = DETALLE.cuartos[n];
+  const porLinea = { portero:[], defensa:[], medio:[], media_punta:[], delantero:[] };
+  (c.alineacion||[]).slice().sort((a,b)=>a.orden_en_linea-b.orden_en_linea).forEach(a => {
+    porLinea[a.linea].push(a);
+  });
+  const filas = Object.keys(NOMBRE_LINEA).map(linea => {
+    const jugadoresLinea = porLinea[linea];
+    if(!jugadoresLinea.length) return '';
+    const pastillas = jugadoresLinea.map(a => `
+      <div class="campo-jugador">
+        <div class="cod">${a.posicion_codigo || '?'}</div>
+        <div class="nom">${a.alevin_d_jugadores?.nombre ?? '?'}</div>
+        <button type="button" class="gol-rapido" title="Registrar gol de este jugador" onclick="golRapido(${n}, '${a.jugador_id}')">⚽ +1</button>
+      </div>`).join('');
+    return `<div class="campo-linea">${pastillas}</div>`;
+  }).join('');
+  return `
+    <div class="campo">${filas || '<p class="muted" style="color:#fff;text-align:center;margin:0;">Sin alineación guardada.</p>'}</div>
+    <button class="btn sec" onclick="EDITANDO_CUARTO.add(${n}); renderPartidoDetalle();">✏️ Editar alineación</button>`;
+}
+
+// Editor de líneas (el formulario clásico de añadir/quitar jugadores por línea).
+function renderEditorLineasCuarto(n){
   const c = DETALLE.cuartos[n];
   const edicion = EDICION_CUARTO[n];
   const convocados = jugadoresConvocados();
+  const cuartoGuardado = !!c.row;
 
   const lineasHtml = Object.keys(NOMBRE_LINEA).map(linea => {
     const seleccion = edicion[linea];
@@ -571,9 +813,11 @@ function renderCuarto(n){
     const chips = seleccion.map((jid, idx) => {
       const j = jugadorPorId(jid);
       const codigo = codigos[idx] || '';
+      const golBtn = cuartoGuardado ? `<button type="button" class="gol-rapido" title="Registrar gol de este jugador" onclick="golRapido(${n}, '${jid}')">⚽</button>` : '';
       return `<span class="chip">${j ? j.nombre : '?'}
         <input type="text" value="${codigo}" data-linea="${linea}" data-idx="${idx}" onchange="codigoManual(${n}, this)" title="código de posición (editable)">
-        <button class="chip-x" onclick="quitarDeLinea(${n}, '${linea}', ${idx})">×</button>
+        ${golBtn}
+        <button type="button" class="chip-x" onclick="quitarDeLinea(${n}, '${linea}', ${idx})">×</button>
       </span>`;
     }).join('');
     const avisoSinTabla = seleccion.length > 0 && !calcularCodigos(linea, seleccion.length)
@@ -595,30 +839,33 @@ function renderCuarto(n){
       </div>`;
   }).join('');
 
+  return `
+    ${lineasHtml}
+    <button class="btn" onclick="guardarCuarto(${n}, this)">Guardar alineación del cuarto ${n}</button>
+    ${cuartoGuardado ? `<button class="btn sec" onclick="EDITANDO_CUARTO.delete(${n}); delete EDICION_CUARTO[${n}]; renderPartidoDetalle();">Cancelar edición</button>` : ''}`;
+}
+
+function renderGolesCuarto(n){
+  const c = DETALLE.cuartos[n];
+  const convocados = jugadoresConvocados();
   const goles = c.goles.map(g => `
-    <li>⚽ ${g.autor?.nombre ?? '?'} ${g.asistente ? `(asist. ${g.asistente.nombre})` : ''}
+    <li>⚽ <strong>${g.autor?.nombre ?? '?'}</strong> ${g.asistente ? `<span class="muted">(asistencia: ${g.asistente.nombre})</span>` : ''}
       <button class="chip-x" onclick="borrarGol('${g.id}', ${n})">×</button>
     </li>`).join('');
   const opcionesGoleador = convocados.map(j => `<option value="${j.id}">${j.nombre}</option>`).join('');
-
   return `
-    <div class="card">
-      <h3>Cuarto ${n}</h3>
-      <div class="fila">
-        <div><label>Goles equipo</label><input id="cq-ge-${n}" type="number" value="${c.row?.goles_equipo ?? ''}"></div>
-        <div><label>Goles rival</label><input id="cq-gr-${n}" type="number" value="${c.row?.goles_rival ?? ''}"></div>
-      </div>
-      ${lineasHtml}
-      <button class="btn" onclick="guardarCuarto(${n})">Guardar alineación del cuarto ${n}</button>
-      <h4>Goles de este cuarto</h4>
-      <ul>${goles || '<li class="muted">Sin goles registrados</li>'}</ul>
+    <div class="linea-box" style="margin-top:16px;border-style:solid;">
+      <strong>⚽ Goles de este cuarto</strong>
+      <ul style="margin:8px 0;padding-left:20px;">${goles || '<li class="muted">Sin goles registrados</li>'}</ul>
       <div class="fila">
         <div><label>Goleador</label><select id="gol-autor-${n}"><option value="">—</option>${opcionesGoleador}</select></div>
         <div><label>Asistente (opcional)</label><select id="gol-asist-${n}"><option value="">—</option>${opcionesGoleador}</select></div>
-        <div style="align-self:flex-end;"><button class="btn sec" onclick="anadirGol(${n})">+ Añadir gol</button></div>
+        <div style="align-self:flex-end;"><button class="btn sec" onclick="anadirGol(${n}, this)">+ Añadir gol</button></div>
       </div>
+      ${!c.row ? '<p class="muted">Guarda primero la alineación de este cuarto para poder registrar goles.</p>' : ''}
     </div>`;
 }
+
 function anadirALinea(n, linea, jugadorId){
   if(!jugadorId) return;
   EDICION_CUARTO[n][linea].push(jugadorId);
@@ -633,69 +880,102 @@ function codigoManual(n, input){
   // guardar estado intermedio, solo evitar que el re-render lo pierda
   // antes de tiempo (guardarCuarto lee el DOM).
 }
-async function guardarCuarto(n){
-  const edicion = EDICION_CUARTO[n];
-  let cuartoId = DETALLE.cuartos[n].row?.id;
 
-  // Portero: si no se ha puesto ninguno, heredar el del cuarto anterior
-  let porteroId = edicion.portero[0];
-  if(!porteroId){
-    for(let prev = n-1; prev >= 1; prev--){
-      const anterior = (DETALLE.cuartos[prev].alineacion||[]).find(a => a.linea === 'portero');
-      if(anterior){ porteroId = anterior.jugador_id; break; }
+// Botones +1 / -1 del marcador del cuarto. Si el cuarto ya existe en BD, se
+// guarda al momento; si aún no se ha creado (primer guardado pendiente), solo
+// actualiza el campo del formulario y quedará guardado al pulsar "Guardar".
+async function incrementarMarcador(n, campoDb, delta){
+  const inputId = campoDb === 'goles_equipo' ? `cq-ge-${n}` : `cq-gr-${n}`;
+  const input = document.getElementById(inputId);
+  if(!input) return;
+  const actual = parseInt(input.value) || 0;
+  const nuevo = Math.max(0, actual + delta);
+  input.value = nuevo;
+  const cuartoId = DETALLE.cuartos[n].row?.id;
+  if(!cuartoId) return; // se guardará junto con la alineación
+  const { error } = await sb.from('alevin_d_cuartos').update({ [campoDb]: nuevo }).eq('id', cuartoId);
+  if(error) return alert(error.message);
+  DETALLE.cuartos[n].row[campoDb] = nuevo;
+  renderPartidoDetalle();
+}
+
+async function guardarCuarto(n, boton){
+  await conSpinner(boton, 'Guardando…', async () => {
+    const edicion = EDICION_CUARTO[n];
+    let cuartoId = DETALLE.cuartos[n].row?.id;
+
+    // Portero: si no se ha puesto ninguno, heredar el del cuarto anterior
+    let porteroId = edicion.portero[0];
+    if(!porteroId){
+      for(let prev = n-1; prev >= 1; prev--){
+        const anterior = (DETALLE.cuartos[prev].alineacion||[]).find(a => a.linea === 'portero');
+        if(anterior){ porteroId = anterior.jugador_id; break; }
+      }
     }
-  }
 
-  const ge = document.getElementById(`cq-ge-${n}`).value;
-  const gr = document.getElementById(`cq-gr-${n}`).value;
+    const ge = document.getElementById(`cq-ge-${n}`).value;
+    const gr = document.getElementById(`cq-gr-${n}`).value;
 
-  if(!cuartoId){
-    const { data, error } = await sb.from('alevin_d_cuartos').insert({
-      partido_id: PARTIDO_ACTUAL, numero: n,
-      goles_equipo: ge===''?null:parseInt(ge), goles_rival: gr===''?null:parseInt(gr)
-    }).select().single();
-    if(error) return alert(error.message);
-    cuartoId = data.id;
-  } else {
-    const { error } = await sb.from('alevin_d_cuartos').update({
-      goles_equipo: ge===''?null:parseInt(ge), goles_rival: gr===''?null:parseInt(gr)
-    }).eq('id', cuartoId);
-    if(error) return alert(error.message);
-  }
-
-  // Reconstruir alineación completa del cuarto
-  await sb.from('alevin_d_alineacion_cuarto').delete().eq('cuarto_id', cuartoId);
-  const filas = [];
-  Object.keys(NOMBRE_LINEA).forEach(linea => {
-    let jugadoresLinea = edicion[linea];
-    if(linea === 'portero'){
-      jugadoresLinea = porteroId ? [porteroId] : [];
+    if(!cuartoId){
+      const { data, error } = await sb.from('alevin_d_cuartos').insert({
+        partido_id: PARTIDO_ACTUAL, numero: n,
+        goles_equipo: ge===''?null:parseInt(ge), goles_rival: gr===''?null:parseInt(gr)
+      }).select().single();
+      if(error) return alert(error.message);
+      cuartoId = data.id;
+    } else {
+      const { error } = await sb.from('alevin_d_cuartos').update({
+        goles_equipo: ge===''?null:parseInt(ge), goles_rival: gr===''?null:parseInt(gr)
+      }).eq('id', cuartoId);
+      if(error) return alert(error.message);
     }
-    jugadoresLinea.forEach((jid, idx) => {
-      const inputCodigo = document.querySelector(`input[data-linea="${linea}"][data-idx="${idx}"]`);
-      const codigos = calcularCodigos(linea, jugadoresLinea.length);
-      const codigo = (inputCodigo && inputCodigo.value.trim()) || (codigos ? codigos[idx] : '?');
-      filas.push({ cuarto_id: cuartoId, jugador_id: jid, linea, orden_en_linea: idx+1, posicion_codigo: codigo });
+
+    // Reconstruir alineación completa del cuarto
+    await sb.from('alevin_d_alineacion_cuarto').delete().eq('cuarto_id', cuartoId);
+    const filas = [];
+    Object.keys(NOMBRE_LINEA).forEach(linea => {
+      let jugadoresLinea = edicion[linea];
+      if(linea === 'portero'){
+        jugadoresLinea = porteroId ? [porteroId] : [];
+      }
+      jugadoresLinea.forEach((jid, idx) => {
+        const inputCodigo = document.querySelector(`input[data-linea="${linea}"][data-idx="${idx}"]`);
+        const codigos = calcularCodigos(linea, jugadoresLinea.length);
+        const codigo = (inputCodigo && inputCodigo.value.trim()) || (codigos ? codigos[idx] : '?');
+        filas.push({ cuarto_id: cuartoId, jugador_id: jid, linea, orden_en_linea: idx+1, posicion_codigo: codigo });
+      });
     });
+    if(filas.length){
+      const { error } = await sb.from('alevin_d_alineacion_cuarto').insert(filas);
+      if(error) return alert(error.message);
+    }
+    delete EDICION_CUARTO[n];
+    EDITANDO_CUARTO.delete(n); // al guardar, pasa a mostrarse como campo (colapsa el editor)
+    await cargarDetallePartido(PARTIDO_ACTUAL);
+    renderPartidoDetalle();
   });
-  if(filas.length){
-    const { error } = await sb.from('alevin_d_alineacion_cuarto').insert(filas);
-    if(error) return alert(error.message);
-  }
-  delete EDICION_CUARTO[n];
+}
+
+async function golRapido(n, jugadorId){
+  const cuartoId = DETALLE.cuartos[n].row?.id;
+  if(!cuartoId) return alert('Guarda antes la alineación del cuarto para poder registrar goles.');
+  const { error } = await sb.from('alevin_d_goles').insert({ cuarto_id: cuartoId, jugador_id: jugadorId });
+  if(error) return alert(error.message);
   await cargarDetallePartido(PARTIDO_ACTUAL);
   renderPartidoDetalle();
 }
-async function anadirGol(n){
+async function anadirGol(n, boton){
   const cuartoId = DETALLE.cuartos[n].row?.id;
   if(!cuartoId) return alert('Guarda antes la alineación del cuarto para poder registrar goles.');
   const autor = document.getElementById(`gol-autor-${n}`).value;
   const asistente = document.getElementById(`gol-asist-${n}`).value || null;
   if(!autor) return alert('Falta el goleador');
-  const { error } = await sb.from('alevin_d_goles').insert({ cuarto_id: cuartoId, jugador_id: autor, asistente_id: asistente });
-  if(error) return alert(error.message);
-  await cargarDetallePartido(PARTIDO_ACTUAL);
-  renderPartidoDetalle();
+  await conSpinner(boton, 'Guardando…', async () => {
+    const { error } = await sb.from('alevin_d_goles').insert({ cuarto_id: cuartoId, jugador_id: autor, asistente_id: asistente });
+    if(error) return alert(error.message);
+    await cargarDetallePartido(PARTIDO_ACTUAL);
+    renderPartidoDetalle();
+  });
 }
 async function borrarGol(id, n){
   const { error } = await sb.from('alevin_d_goles').delete().eq('id', id);
@@ -730,18 +1010,19 @@ function guardarUltimoTipoPartido(id){
    ADMIN — mantenimiento de catálogos (tipos de partido, …)
    ============================================================ */
 let TIPO_PARTIDO_EN_EDICION = null;
-function renderAdmin(){
-  const filas = TIPOS_PARTIDO.map(t => {
-    const editando = TIPO_PARTIDO_EN_EDICION === t.id;
-    if(editando){
+let TIPO_JUGADOR_EN_EDICION = null;
+
+function filasCatalogo(items, enEdicionId, prefijo, fnGuardar, fnEliminar, fnEditar){
+  return items.map(t => {
+    if(enEdicionId === t.id){
       return `
         <tr>
           <td colspan="2">
             <div class="fila">
-              <div><input id="at-nombre-${t.id}" value="${t.nombre}"></div>
+              <div><input id="${prefijo}-nombre-${t.id}" value="${t.nombre}"></div>
             </div>
-            <button class="btn" onclick="guardarTipoPartido(${t.id})">Guardar</button>
-            <button class="btn sec" onclick="TIPO_PARTIDO_EN_EDICION=null; renderAdmin();">Cancelar</button>
+            <button class="btn" onclick="${fnGuardar}(${t.id})">Guardar</button>
+            <button class="btn sec" onclick="${fnEditar}(null)">Cancelar</button>
           </td>
         </tr>`;
     }
@@ -749,22 +1030,45 @@ function renderAdmin(){
       <tr>
         <td>${t.nombre}</td>
         <td>
-          <button class="btn sec" onclick="TIPO_PARTIDO_EN_EDICION=${t.id}; renderAdmin();">Editar</button>
-          <button class="btn danger" onclick="eliminarTipoPartido(${t.id})">Eliminar</button>
+          <button class="btn sec" onclick="${fnEditar}(${t.id})">Editar</button>
+          <button class="btn danger" onclick="${fnEliminar}(${t.id})">Eliminar</button>
         </td>
       </tr>`;
   }).join('');
+}
+function editarTipoPartido(id){ TIPO_PARTIDO_EN_EDICION = id; renderAdmin(); }
+function editarTipoJugador(id){ TIPO_JUGADOR_EN_EDICION = id; renderAdmin(); }
+
+function renderAdmin(){
+  const filasPartido = filasCatalogo(TIPOS_PARTIDO, TIPO_PARTIDO_EN_EDICION, 'at', 'guardarTipoPartido', 'eliminarTipoPartido', 'editarTipoPartido');
+  const filasJugador = filasCatalogo(TIPOS_JUGADOR, TIPO_JUGADOR_EN_EDICION, 'aj', 'guardarTipoJugador', 'eliminarTipoJugador', 'editarTipoJugador');
   document.getElementById('main').innerHTML = `
     <div class="card">
       <h2>Admin · Tipos de partido</h2>
       <div class="tabla-wrap"><table>
         <thead><tr><th>Nombre</th><th></th></tr></thead>
-        <tbody>${filas || '<tr><td colspan="2" class="muted">Sin tipos.</td></tr>'}</tbody>
+        <tbody>${filasPartido || '<tr><td colspan="2" class="muted">Sin tipos.</td></tr>'}</tbody>
       </table></div>
       <div class="fila" style="margin-top:10px;">
         <div><input id="at-nuevo" placeholder="Nuevo tipo de partido (p.ej. Copa)"></div>
         <div><button class="btn" onclick="crearTipoPartidoAdmin()">Añadir</button></div>
       </div>
+    </div>
+    <div class="card">
+      <h2>Admin · Tipos de jugador</h2>
+      <div class="tabla-wrap"><table>
+        <thead><tr><th>Nombre</th><th></th></tr></thead>
+        <tbody>${filasJugador || '<tr><td colspan="2" class="muted">Sin tipos.</td></tr>'}</tbody>
+      </table></div>
+      <div class="fila" style="margin-top:10px;">
+        <div><input id="aj-nuevo" placeholder="Nuevo tipo de jugador"></div>
+        <div><button class="btn" onclick="crearTipoJugadorAdmin()">Añadir</button></div>
+      </div>
+      <p class="muted">Solo los jugadores de tipo "Fijo" se marcan automáticamente en la convocatoria de un partido nuevo.</p>
+    </div>
+    <div class="card">
+      <h2>Admin · Cuenta</h2>
+      <button class="btn sec" onclick="cambiarContrasena()">Cambiar contraseña</button>
     </div>`;
 }
 async function crearTipoPartidoAdmin(){
@@ -792,6 +1096,33 @@ async function eliminarTipoPartido(id){
   const { error } = await sb.from('alevin_d_tipos_partido').delete().eq('id', id);
   if(error) return alert(error.message);
   await cargarTiposPartido();
+  renderAdmin();
+}
+async function crearTipoJugadorAdmin(){
+  const nombre = document.getElementById('aj-nuevo').value.trim();
+  if(!nombre) return alert('Falta el nombre');
+  const { error } = await sb.from('alevin_d_tipos_jugador').insert({ nombre });
+  if(error) return alert(error.message);
+  await cargarTiposJugador();
+  renderAdmin();
+}
+async function guardarTipoJugador(id){
+  const nombre = document.getElementById(`aj-nombre-${id}`).value.trim();
+  if(!nombre) return alert('Falta el nombre');
+  const { error } = await sb.from('alevin_d_tipos_jugador').update({ nombre }).eq('id', id);
+  if(error) return alert(error.message);
+  TIPO_JUGADOR_EN_EDICION = null;
+  await cargarTiposJugador();
+  await cargarJugadores();
+  renderAdmin();
+}
+async function eliminarTipoJugador(id){
+  const { count } = await sb.from('alevin_d_jugadores').select('id', { count:'exact', head:true }).eq('tipo_jugador_id', id);
+  if(count > 0){ alert(`No se puede eliminar: hay ${count} jugador(es) con este tipo. Edítalo en vez de borrarlo.`); return; }
+  if(!confirm('¿Eliminar este tipo de jugador?')) return;
+  const { error } = await sb.from('alevin_d_tipos_jugador').delete().eq('id', id);
+  if(error) return alert(error.message);
+  await cargarTiposJugador();
   renderAdmin();
 }
 
