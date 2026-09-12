@@ -2,6 +2,14 @@
 
 Histórico funcional del proyecto (qué cambia para el usuario, no detalles técnicos de implementación).
 
+## 2026-09-12 (2) — Orientación del campo, botón de eliminar, gol rápido y estadísticas/libro
+
+- **Portero abajo en la vista de campo**: se ha invertido el orden de las líneas — ahora se pinta delantero arriba y portero abajo, como un campo visto desde el propio banquillo. El lateral/central izquierdo sigue apareciendo a la izquierda de la pantalla y el derecho a la derecha (no se ha tocado ese eje).
+- **Quitado el botón de gol rápido (⚽ +1) de la vista de campo** — se mantiene solo en el formulario de edición de líneas, para evitar toques accidentales al mirar la alineación.
+- **"Eliminar partido" menos accesible**: ya no está arriba junto al título del partido; ahora hay que desplegar "Opciones avanzadas" al final de la ficha del partido para verlo, y se muestra más pequeño.
+- **Nueva pestaña "Estadísticas"**: tabla por jugador con cuartos jugados, goles, asistencias y — si ha jugado de portero — cuartos de portero y goles encajados (calculado sumando los goles del rival de esos cuartos). Se recalcula a partir de lo que ya hay guardado, así que también sirve para comprobar de un vistazo que todo se está registrando bien.
+- **"Libro de temporada" con contenido real**: en vez del aviso de "Próximamente", ahora se ve una vista previa con todos los partidos guardados — resultado, y por cada cuarto la alineación (línea a línea) y los goles/asistencias. Es la base sobre la que se construirá el PDF final (con diseño y estadísticas de equipo), que sigue pendiente.
+
 ## 2026-09-12 — Rendimiento, navegación y mejoras en cuartos/goles
 
 - **Carga de un partido más rápida**: al pulsar un partido, antes se pedían los datos de cada cuarto uno detrás de otro (hasta 9 peticiones seguidas); ahora se piden todos a la vez. Además se ve al instante "Cargando…" en vez de quedarse la pantalla en blanco mientras llega la información.

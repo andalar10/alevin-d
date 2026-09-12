@@ -95,6 +95,7 @@
       <button id="nav-jugadores" onclick="irA('jugadores')">Jugadores</button>
       <button id="nav-partidos" onclick="irA('partidos')">Partidos</button>
       <button id="nav-libro" onclick="irA('libro')">Libro (PDF)</button>
+      <button id="nav-estadisticas" onclick="irA('estadisticas')">Estadísticas</button>
       <button id="nav-actual" onclick="irAPartidoActual()" class="oculto">⚡ Partido actual</button>
       <button id="nav-admin" onclick="irA('admin')">Admin</button>
       <button onclick="cerrarSesion()" style="margin-left:8px;">Salir</button>
@@ -261,7 +262,7 @@ async function cargarTodo(){
   const partidoGuardado = leerPartidoActualId();
   if(vistaGuardada === 'partido-detalle' && partidoGuardado && PARTIDOS.some(p => p.id === partidoGuardado)){
     await abrirPartido(partidoGuardado);
-  } else if(vistaGuardada && ['jugadores','partidos','libro','admin'].includes(vistaGuardada)){
+  } else if(vistaGuardada && ['jugadores','partidos','libro','admin','estadisticas'].includes(vistaGuardada)){
     irA(vistaGuardada);
   } else {
     irA(VISTA);
@@ -309,12 +310,13 @@ function irA(vista){
   VISTA = vista;
   PARTIDO_ACTUAL = null;
   guardarVista(vista);
-  ['jugadores','partidos','libro','admin'].forEach(v => {
+  ['jugadores','partidos','libro','estadisticas','admin'].forEach(v => {
     document.getElementById('nav-'+v).classList.toggle('activo', v === vista);
   });
   if(vista === 'jugadores') renderJugadores();
   if(vista === 'partidos') renderPartidos();
   if(vista === 'libro') renderLibro();
+  if(vista === 'estadisticas') renderEstadisticas();
   if(vista === 'admin') renderAdmin();
   actualizarBotonPartidoActual();
 }
@@ -515,6 +517,7 @@ async function abrirPartido(id){
   document.getElementById('nav-partidos').classList.add('activo');
   document.getElementById('nav-jugadores').classList.remove('activo');
   document.getElementById('nav-libro').classList.remove('activo');
+  document.getElementById('nav-estadisticas').classList.remove('activo');
   actualizarBotonPartidoActual();
   DETALLE = null;
   renderPartidoDetalle(); // muestra "Cargando…" mientras llegan los datos
@@ -598,13 +601,10 @@ function renderPartidoDetalle(){
   main.innerHTML = `
     <button class="volver" onclick="irA('partidos')">← Volver a partidos</button>
     <div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;">
-        <div>
-          <h2 style="margin-bottom:2px;">${p.rival} — ${p.fecha}</h2>
-          <p class="muted" style="margin-top:0;">${p.alevin_d_tipos_partido?.nombre ?? ''} · ${p.condicion ?? ''} ${p.hora ? '· '+p.hora : ''}</p>
-          ${totalHtml}
-        </div>
-        <button class="btn danger" onclick="eliminarPartido(this)">Eliminar partido</button>
+      <div>
+        <h2 style="margin-bottom:2px;">${p.rival} — ${p.fecha}</h2>
+        <p class="muted" style="margin-top:0;">${p.alevin_d_tipos_partido?.nombre ?? ''} · ${p.condicion ?? ''} ${p.hora ? '· '+p.hora : ''}</p>
+        ${totalHtml}
       </div>
       <div class="fila">
         <div><label>Goles a favor (resultado oficial)</label><input id="pd-gf" type="number" value="${p.goles_favor ?? ''}"></div>
@@ -615,6 +615,10 @@ function renderPartidoDetalle(){
       <input type="file" id="pd-foto" accept="image/*" onchange="subirFotoConvocatoria(this.files[0])">
       <p id="pd-foto-estado" class="muted"></p>
       ${DETALLE.fotoUrl ? `<p><img src="${DETALLE.fotoUrl}" alt="Foto de convocatoria" style="max-width:100%;border-radius:6px;margin-top:8px;"></p>` : ''}
+      <details style="margin-top:14px;">
+        <summary class="muted" style="cursor:pointer;font-size:12px;">Opciones avanzadas</summary>
+        <button class="btn danger" style="margin-top:8px;font-size:12px;padding:4px 10px;" onclick="eliminarPartido(this)">Eliminar partido</button>
+      </details>
     </div>
     <div class="card">
       <h3>Convocatoria</h3>
@@ -784,14 +788,16 @@ function renderCampoCuarto(n){
   (c.alineacion||[]).slice().sort((a,b)=>a.orden_en_linea-b.orden_en_linea).forEach(a => {
     porLinea[a.linea].push(a);
   });
-  const filas = Object.keys(NOMBRE_LINEA).map(linea => {
+  // Orden visual de arriba a abajo: delantero primero, portero al final (abajo),
+  // para que se lea como un campo real con la portería propia en la parte de abajo.
+  const ordenVisual = ['delantero','media_punta','medio','defensa','portero'];
+  const filas = ordenVisual.map(linea => {
     const jugadoresLinea = porLinea[linea];
     if(!jugadoresLinea.length) return '';
     const pastillas = jugadoresLinea.map(a => `
       <div class="campo-jugador">
         <div class="cod">${a.posicion_codigo || '?'}</div>
         <div class="nom">${a.alevin_d_jugadores?.nombre ?? '?'}</div>
-        <button type="button" class="gol-rapido" title="Registrar gol de este jugador" onclick="golRapido(${n}, '${a.jugador_id}')">⚽ +1</button>
       </div>`).join('');
     return `<div class="campo-linea">${pastillas}</div>`;
   }).join('');
@@ -987,11 +993,151 @@ async function borrarGol(id, n){
 /* ============================================================
    LIBRO / PDF — pendiente
    ============================================================ */
-function renderLibro(){
-  document.getElementById('main').innerHTML = `
+/* ============================================================
+   LIBRO — datos de todos los partidos, para la futura generación
+   del PDF; de momento se muestra como vista previa en la propia app.
+   ============================================================ */
+async function cargarDatosLibro(){
+  const idsPartidos = PARTIDOS.map(p => p.id);
+  if(!idsPartidos.length) return { cuartosPorPartido: {} };
+  const { data: cuartos } = await sb.from('alevin_d_cuartos').select('*').in('partido_id', idsPartidos).order('numero');
+  const idsCuartos = (cuartos||[]).map(c => c.id);
+  let alineaciones = [], goles = [];
+  if(idsCuartos.length){
+    const [alRes, glRes] = await Promise.all([
+      sb.from('alevin_d_alineacion_cuarto').select('*, alevin_d_jugadores(nombre)').in('cuarto_id', idsCuartos),
+      sb.from('alevin_d_goles').select('*, autor:alevin_d_jugadores!alevin_d_goles_jugador_id_fkey(nombre), asistente:alevin_d_jugadores!alevin_d_goles_asistente_id_fkey(nombre)').in('cuarto_id', idsCuartos)
+    ]);
+    alineaciones = alRes.data || [];
+    goles = glRes.data || [];
+  }
+  const cuartosPorPartido = {};
+  (cuartos||[]).forEach(c => {
+    if(!cuartosPorPartido[c.partido_id]) cuartosPorPartido[c.partido_id] = [];
+    cuartosPorPartido[c.partido_id].push({
+      ...c,
+      alineacion: alineaciones.filter(a => a.cuarto_id === c.id),
+      goles: goles.filter(g => g.cuarto_id === c.id)
+    });
+  });
+  return { cuartosPorPartido };
+}
+async function renderLibro(){
+  const main = document.getElementById('main');
+  main.innerHTML = '<p class="muted">Cargando libro de temporada…</p>';
+  const { cuartosPorPartido } = await cargarDatosLibro();
+  const partidosOrdenados = PARTIDOS.slice().sort((a,b) => (a.fecha||'').localeCompare(b.fecha||''));
+  const secciones = partidosOrdenados.map(p => {
+    const cuartos = (cuartosPorPartido[p.id] || []).sort((a,b) => a.numero - b.numero);
+    const totalGe = cuartos.reduce((s,c)=> s + (c.goles_equipo||0), 0);
+    const totalGr = cuartos.reduce((s,c)=> s + (c.goles_rival||0), 0);
+    const hayDatosCuartos = cuartos.some(c => c.goles_equipo != null || c.goles_rival != null);
+    const resultadoTexto = (p.goles_favor!=null && p.goles_contra!=null)
+      ? `Resultado oficial: ${p.goles_favor} - ${p.goles_contra}`
+      : (hayDatosCuartos ? `Resultado (según cuartos): ${totalGe} - ${totalGr}` : 'Resultado: sin datos');
+    const cuartosHtml = cuartos.map(c => {
+      const porLinea = {};
+      c.alineacion.forEach(a => {
+        if(!porLinea[a.linea]) porLinea[a.linea] = [];
+        porLinea[a.linea].push(a);
+      });
+      const lineasTexto = Object.keys(NOMBRE_LINEA)
+        .filter(l => porLinea[l] && porLinea[l].length)
+        .map(l => `<strong>${NOMBRE_LINEA[l]}:</strong> ` + porLinea[l].slice().sort((a,b)=>a.orden_en_linea-b.orden_en_linea).map(a => `${a.posicion_codigo||'?'} ${a.alevin_d_jugadores?.nombre??'?'}`).join(', '))
+        .join('<br>');
+      const golesTexto = c.goles.map(g => `⚽ ${g.autor?.nombre??'?'}${g.asistente ? ' (asist. '+g.asistente.nombre+')' : ''}`).join('<br>') || '<span class="muted">Sin goles</span>';
+      return `
+        <div class="linea-box">
+          <strong>Cuarto ${c.numero}</strong> — ${c.goles_equipo ?? '?'} - ${c.goles_rival ?? '?'}
+          <p style="margin:6px 0;">${lineasTexto || '<span class="muted">Sin alineación guardada</span>'}</p>
+          <p style="margin:6px 0;">${golesTexto}</p>
+        </div>`;
+    }).join('') || '<p class="muted">Sin cuartos registrados.</p>';
+    return `
+      <div class="card">
+        <h3 style="margin-bottom:4px;">${p.rival} — ${p.fecha} <span class="badge ${(p.alevin_d_tipos_partido?.nombre||'').toLowerCase()}">${p.alevin_d_tipos_partido?.nombre??''}</span></h3>
+        <p class="muted" style="margin-top:0;">${p.condicion ?? ''} ${p.hora ? '· '+p.hora : ''} · ${resultadoTexto}</p>
+        ${cuartosHtml}
+      </div>`;
+  }).join('') || '<p class="muted">Aún no hay partidos con los que generar el libro.</p>';
+
+  main.innerHTML = `
     <div class="card">
-      <h2>Libro de temporada (PDF)</h2>
-      <p class="muted">Próximamente: generación del PDF con todos los partidos, alineaciones y estadísticas, separando amistosos de liga.</p>
+      <h2>Libro de temporada</h2>
+      <p class="muted">Vista previa con todo lo guardado hasta ahora, partido a partido. Es el primer paso hacia el PDF final (que añadirá diseño, estadísticas de la plantilla y la separación amistosos/liga) — de momento sirve para comprobar que la información está completa.</p>
+    </div>
+    ${secciones}`;
+}
+
+/* ============================================================
+   ESTADÍSTICAS — cuartos jugados, goles, asistencias y goles
+   encajados (para quien jugó de portero), calculado a partir de
+   lo guardado en cada cuarto. Sirve también para comprobar que
+   todo se está guardando correctamente.
+   ============================================================ */
+async function cargarEstadisticas(){
+  const { data: alineaciones } = await sb
+    .from('alevin_d_alineacion_cuarto')
+    .select('jugador_id, linea, cuarto_id, alevin_d_cuartos(goles_rival)');
+  const { data: goles } = await sb
+    .from('alevin_d_goles')
+    .select('jugador_id, asistente_id');
+  return { alineaciones: alineaciones || [], goles: goles || [] };
+}
+function calcularEstadisticasJugadores(alineaciones, goles){
+  const stats = {};
+  function obtener(jid){
+    if(!stats[jid]) stats[jid] = { cuartosJugados: new Set(), goles: 0, asistencias: 0, cuartosPortero: new Set(), golesEncajados: 0 };
+    return stats[jid];
+  }
+  alineaciones.forEach(a => {
+    const s = obtener(a.jugador_id);
+    s.cuartosJugados.add(a.cuarto_id);
+    if(a.linea === 'portero'){
+      s.cuartosPortero.add(a.cuarto_id);
+      const gr = a.alevin_d_cuartos?.goles_rival;
+      if(gr != null) s.golesEncajados += gr;
+    }
+  });
+  goles.forEach(g => {
+    if(g.jugador_id) obtener(g.jugador_id).goles += 1;
+    if(g.asistente_id) obtener(g.asistente_id).asistencias += 1;
+  });
+  return stats;
+}
+async function renderEstadisticas(){
+  const main = document.getElementById('main');
+  main.innerHTML = '<p class="muted">Calculando estadísticas…</p>';
+  const { alineaciones, goles } = await cargarEstadisticas();
+  const stats = calcularEstadisticasJugadores(alineaciones, goles);
+  const filas = JUGADORES
+    .slice()
+    .sort((a,b) => (b.activo - a.activo) || a.nombre.localeCompare(b.nombre))
+    .map(j => {
+      const s = stats[j.id];
+      if(!s && !j.activo) return ''; // ocultar bajas sin ningún dato histórico
+      const cuartosJugados = s ? s.cuartosJugados.size : 0;
+      const cuartosPortero = s ? s.cuartosPortero.size : 0;
+      const portero = cuartosPortero
+        ? `${cuartosPortero} <span class="muted">(${s.golesEncajados} encajados)</span>`
+        : '—';
+      return `<tr>
+        <td>${j.dorsal ?? '-'}</td>
+        <td>${nombreConAlias(j)}${!j.activo ? ' <span class="badge">baja</span>' : ''}</td>
+        <td>${cuartosJugados}</td>
+        <td>${s ? s.goles : 0}</td>
+        <td>${s ? s.asistencias : 0}</td>
+        <td>${portero}</td>
+      </tr>`;
+    }).join('');
+  main.innerHTML = `
+    <div class="card">
+      <h2>Estadísticas de la plantilla</h2>
+      <p class="muted">Calculadas a partir de los cuartos y goles ya guardados — también sirve para comprobar de un vistazo que todo se está registrando bien.</p>
+      <div class="tabla-wrap"><table>
+        <thead><tr><th>Dorsal</th><th>Jugador</th><th>Cuartos jugados</th><th>Goles</th><th>Asistencias</th><th>De portero (encajados)</th></tr></thead>
+        <tbody>${filas || '<tr><td colspan="6" class="muted">Sin datos todavía.</td></tr>'}</tbody>
+      </table></div>
     </div>`;
 }
 

@@ -3,7 +3,7 @@
 ## Protocolo anti-regresión — aplicar antes de editar `index.html`
 
 1. **Descargar siempre la versión real y desplegada antes de editar**: `https://raw.githubusercontent.com/andalar10/alevin-d/main/index.html` (ajustar si el repo/rama cambian). No editar nunca a partir de la copia que esté en el contexto de la conversación sin verificar antes que coincide con la desplegada.
-2. **Comprobar funciones marcadoras tras cada cambio** (grep sobre el fichero para confirmar que siguen presentes): `calcularCodigos`, `renderCuarto`, `renderEditorLineasCuarto`, `renderCampoCuarto`, `guardarCuarto`, `golRapido`, `incrementarMarcador`, `renderPartidoDetalle`, `subirFotoConvocatoria`, `anadirGol`, `renderAdmin`, `cambiarContrasena`, `conSpinner`, `irAPartidoActual`.
+2. **Comprobar funciones marcadoras tras cada cambio** (grep sobre el fichero para confirmar que siguen presentes): `calcularCodigos`, `renderCuarto`, `renderEditorLineasCuarto`, `renderCampoCuarto`, `guardarCuarto`, `golRapido`, `incrementarMarcador`, `renderPartidoDetalle`, `subirFotoConvocatoria`, `anadirGol`, `renderAdmin`, `cambiarContrasena`, `conSpinner`, `irAPartidoActual`, `renderLibro`, `cargarDatosLibro`, `renderEstadisticas`, `cargarEstadisticas`, `calcularEstadisticasJugadores`.
 3. **Actualizar `CHANGELOG.md`** tras cada cambio relevante, describiendo la funcionalidad, no detalles técnicos.
 4. **Validar sintaxis JS** con `node --check` tras cada edición (extraer el bloque `<script>` inline, comprobar el último match).
 
@@ -57,6 +57,15 @@ El marcador de cada cuarto tiene botones +1/-1 (`incrementarMarcador`) que, si e
 ## Rendimiento de `cargarDetallePartido`
 
 Antes se pedía la alineación y los goles cuarto a cuarto dentro de un bucle `for` con `await` secuencial (hasta 8 peticiones extra). Ahora se piden todas las alineaciones y todos los goles del partido de una vez con `.in('cuarto_id', idsCuartos)`, en paralelo con la convocatoria y los cuartos vía `Promise.all`, y se reparten en memoria por número de cuarto. Si se toca esta función, mantener el patrón de "una consulta por tabla para todo el partido", no una por cuarto.
+
+## Orientación del campo (vista de solo lectura, `renderCampoCuarto`)
+
+Las líneas se pintan de arriba a abajo en el orden `['delantero','media_punta','medio','defensa','portero']` — portero abajo, como el propio banquillo mirando hacia el campo. Dentro de cada línea, el eje izquierda/derecha NO se ha tocado: sigue usando `flex-direction: row-reverse` sobre el array ya ordenado por `orden_en_linea` (que respeta "primero = más a la derecha" de la convención de entrada), así que el último de la línea (el "…izquierdo": DCI, MCI, LI) queda a la izquierda de la pantalla y el primero a la derecha. Si en algún momento se ve al revés en el dispositivo real, el punto a revisar es ese `row-reverse` en `.campo-linea`, no el orden de las líneas.
+
+## Estadísticas y libro de temporada
+
+- `renderEstadisticas`/`cargarEstadisticas`/`calcularEstadisticasJugadores`: una única consulta a `alevin_d_alineacion_cuarto` (con `alevin_d_cuartos(goles_rival)` embebido) y otra a `alevin_d_goles`, agregadas en memoria por `jugador_id`. Cuartos de portero cuentan goles encajados sumando `goles_rival` de los cuartos en los que ese jugador jugó en la línea `portero`.
+- `renderLibro`/`cargarDatosLibro`: de momento es una vista previa en HTML dentro de la propia app (no un PDF), con toda la información de cada partido — resultado, alineación por cuarto y goles/asistencias. Pendiente: generar el PDF real (jsPDF, ver patrón ya usado en Fútbol Jueves Mundial) a partir de estos mismos datos, añadiendo estadísticas de equipo y diseño.
 
 ## Histórico de decisiones
 
