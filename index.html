@@ -508,6 +508,8 @@ async function crearPartido(boton){
    PARTIDO — detalle (convocatoria, foto, 4 cuartos)
    ============================================================ */
 let DETALLE = null; // { partido, convocatoria:[{jugador_id,dorsal_partido,jugador}], cuartos:{1:{...},2:...} }
+let FOTO_ABIERTA = false; // la foto de convocatoria se muestra plegada por defecto, como los cuartos
+let EDITANDO_DATOS_PARTIDO = false; // panel "Editar datos" (rival, fecha, hora, condición, tipo) abierto
 
 async function abrirPartido(id){
   PARTIDO_ACTUAL = id;
@@ -520,6 +522,7 @@ async function abrirPartido(id){
   document.getElementById('nav-estadisticas').classList.remove('activo');
   actualizarBotonPartidoActual();
   DETALLE = null;
+  EDITANDO_DATOS_PARTIDO = false;
   renderPartidoDetalle(); // muestra "Cargando…" mientras llegan los datos
   await cargarDetallePartido(id);
   renderPartidoDetalle();
@@ -601,20 +604,30 @@ function renderPartidoDetalle(){
   main.innerHTML = `
     <button class="volver" onclick="irA('partidos')">← Volver a partidos</button>
     <div class="card">
+      ${EDITANDO_DATOS_PARTIDO ? renderEditorDatosPartido(p) : `
       <div>
-        <h2 style="margin-bottom:2px;">${p.rival} — ${p.fecha}</h2>
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;">
+          <h2 style="margin-bottom:2px;">${p.rival} — ${p.fecha}</h2>
+          <button class="btn sec" style="font-size:13px;padding:4px 10px;" onclick="abrirEdicionDatosPartido()">✏️ Editar datos</button>
+        </div>
         <p class="muted" style="margin-top:0;">${p.alevin_d_tipos_partido?.nombre ?? ''} · ${p.condicion ?? ''} ${p.hora ? '· '+p.hora : ''}</p>
         ${totalHtml}
-      </div>
+      </div>`}
       <div class="fila">
         <div><label>Goles a favor (resultado oficial)</label><input id="pd-gf" type="number" value="${p.goles_favor ?? ''}"></div>
         <div><label>Goles en contra (resultado oficial)</label><input id="pd-gc" type="number" value="${p.goles_contra ?? ''}"></div>
         <div style="align-self:flex-end;"><button class="btn sec" onclick="guardarResultadoFinal(this)">Guardar resultado</button></div>
       </div>
-      <h3>Foto de convocatoria</h3>
-      <input type="file" id="pd-foto" accept="image/*" onchange="subirFotoConvocatoria(this.files[0])">
+      <details style="margin-top:12px;" ${FOTO_ABIERTA ? 'open' : ''} ontoggle="FOTO_ABIERTA = this.open;">
+      <summary style="cursor:pointer;font-weight:600;font-size:15px;padding:6px 0;">📷 Foto de convocatoria <span class="muted" style="font-weight:normal;">— ${p.foto_convocatoria_path ? 'pulsa para ver' : 'sin foto'}</span></summary>
+      <input type="file" id="pd-foto" accept="image/*" style="display:none;" onchange="subirFotoConvocatoria(this.files[0])">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn sec" type="button" onclick="document.getElementById('pd-foto').click()">📷 ${p.foto_convocatoria_path ? 'Cambiar foto' : 'Subir foto'}</button>
+        ${p.foto_convocatoria_path ? `<button class="btn danger" type="button" onclick="quitarFotoConvocatoria(this)">Quitar foto</button>` : ''}
+      </div>
       <p id="pd-foto-estado" class="muted"></p>
       ${DETALLE.fotoUrl ? `<p><img src="${DETALLE.fotoUrl}" alt="Foto de convocatoria" style="max-width:100%;border-radius:6px;margin-top:8px;"></p>` : ''}
+      </details>
       <details style="margin-top:14px;">
         <summary class="muted" style="cursor:pointer;font-size:12px;">Opciones avanzadas</summary>
         <button class="btn danger" style="margin-top:8px;font-size:12px;padding:4px 10px;" onclick="eliminarPartido(this)">Eliminar partido</button>
@@ -632,6 +645,49 @@ function renderPartidoDetalle(){
     </div>
     ${cuartosHtml}
   `;
+}
+function renderEditorDatosPartido(p){
+  const opcionesTipo = TIPOS_PARTIDO.map(t => `<option value="${t.id}" ${t.id===p.tipo_partido_id?'selected':''}>${t.nombre}</option>`).join('');
+  const esc = v => String(v ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+  return `
+    <h2>Editar datos del partido</h2>
+    <div class="fila">
+      <div><label>Rival</label><input id="ep-rival" value="${esc(p.rival)}"></div>
+      <div><label>Fecha</label><input id="ep-fecha" type="date" value="${esc(p.fecha)}"></div>
+      <div><label>Hora</label><input id="ep-hora" type="time" value="${esc((p.hora||'').slice(0,5))}"></div>
+    </div>
+    <div class="fila">
+      <div><label>Condición</label>
+        <select id="ep-condicion">
+          <option value="casa" ${p.condicion==='casa'?'selected':''}>Casa</option>
+          <option value="fuera" ${p.condicion==='fuera'?'selected':''}>Fuera</option>
+        </select>
+      </div>
+      <div><label>Tipo de partido</label><select id="ep-tipo">${opcionesTipo}</select></div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+      <button class="btn" onclick="guardarDatosPartido(this)">Guardar cambios</button>
+      <button class="btn sec" onclick="cancelarEdicionDatosPartido()">Cancelar</button>
+    </div>`;
+}
+function abrirEdicionDatosPartido(){ EDITANDO_DATOS_PARTIDO = true; renderPartidoDetalle(); }
+function cancelarEdicionDatosPartido(){ EDITANDO_DATOS_PARTIDO = false; renderPartidoDetalle(); }
+async function guardarDatosPartido(boton){
+  const rival = document.getElementById('ep-rival').value.trim();
+  const fecha = document.getElementById('ep-fecha').value;
+  const hora = document.getElementById('ep-hora').value || null;
+  const condicion = document.getElementById('ep-condicion').value;
+  const tipo_partido_id = parseInt(document.getElementById('ep-tipo').value);
+  if(!rival || !fecha) return alert('Rival y fecha son obligatorios');
+  await conSpinner(boton, 'Guardando…', async () => {
+    const { error } = await sb.from('alevin_d_partidos')
+      .update({ rival, fecha, hora, condicion, tipo_partido_id }).eq('id', PARTIDO_ACTUAL);
+    if(error) return alert(error.message);
+    await cargarPartidos();
+    await cargarDetallePartido(PARTIDO_ACTUAL);
+    EDITANDO_DATOS_PARTIDO = false;
+    renderPartidoDetalle();
+  });
 }
 async function eliminarPartido(boton){
   if(!confirm(`¿Eliminar el partido contra ${DETALLE.partido.rival} (${DETALLE.partido.fecha})? Se borrarán también sus cuartos, alineaciones y goles. Esta acción no se puede deshacer.`)) return;
@@ -706,15 +762,34 @@ async function subirFotoConvocatoria(file){
   if(!file) return;
   const estado = document.getElementById('pd-foto-estado');
   if(estado) estado.innerHTML = '<span class="spinner" style="border-color:#777;"></span>Subiendo foto…';
-  const ext = file.name.split('.').pop();
-  const path = `${PARTIDO_ACTUAL}/convocatoria.${ext}`;
+  FOTO_ABIERTA = true;
+  const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+  // Nombre único por subida: al cambiar la foto no se queda en caché la anterior.
+  const path = `${PARTIDO_ACTUAL}/convocatoria-${Date.now()}.${ext}`;
+  const pathAnterior = DETALLE?.partido?.foto_convocatoria_path || null;
   const { error } = await sb.storage.from('alevin-d-fotos').upload(path, file, { upsert: true });
   if(error){ if(estado) estado.textContent = ''; return alert(error.message); }
   const { error: e2 } = await sb.from('alevin_d_partidos').update({ foto_convocatoria_path: path }).eq('id', PARTIDO_ACTUAL);
   if(e2){ if(estado) estado.textContent = ''; return alert(e2.message); }
+  if(pathAnterior && pathAnterior !== path){
+    await sb.storage.from('alevin-d-fotos').remove([pathAnterior]); // limpieza; si falla no pasa nada
+  }
   await cargarPartidos();
   await cargarDetallePartido(PARTIDO_ACTUAL);
   renderPartidoDetalle();
+}
+
+async function quitarFotoConvocatoria(boton){
+  if(!confirm('¿Quitar la foto de convocatoria de este partido?')) return;
+  const pathAnterior = DETALLE?.partido?.foto_convocatoria_path;
+  await conSpinner(boton, 'Quitando…', async () => {
+    const { error } = await sb.from('alevin_d_partidos').update({ foto_convocatoria_path: null }).eq('id', PARTIDO_ACTUAL);
+    if(error) return alert(error.message);
+    if(pathAnterior) await sb.storage.from('alevin-d-fotos').remove([pathAnterior]);
+    await cargarPartidos();
+    await cargarDetallePartido(PARTIDO_ACTUAL);
+    renderPartidoDetalle();
+  });
 }
 
 /* ============================================================
@@ -723,6 +798,129 @@ async function subirFotoConvocatoria(file){
 // Estado temporal de edición de líneas por cuarto (no persistido hasta "Guardar")
 const EDICION_CUARTO = {}; // { [numero]: { portero:[jugador_id], defensa:[...], medio:[...], media_punta:[...], delantero:[...] } }
 
+// Posiciones disponibles en el modo "por jugador". "x" = posición lateral,
+// 0 = más a la derecha … 4 = más a la izquierda (convención del proyecto:
+// dentro de cada línea el orden es siempre de derecha a izquierda).
+const POSICIONES = [
+  { cod:'GK',  linea:'portero',     x:2, nombre:'Portero' },
+  { cod:'LD',  linea:'defensa',     x:0, nombre:'Lateral derecho' },
+  { cod:'DCD', linea:'defensa',     x:1, nombre:'Central derecho' },
+  { cod:'DCC', linea:'defensa',     x:2, nombre:'Central' },
+  { cod:'DCI', linea:'defensa',     x:3, nombre:'Central izquierdo' },
+  { cod:'LI',  linea:'defensa',     x:4, nombre:'Lateral izquierdo' },
+  { cod:'MD',  linea:'medio',       x:0, nombre:'Medio derecho' },
+  { cod:'MCD', linea:'medio',       x:1, nombre:'Medio centro derecho' },
+  { cod:'MC',  linea:'medio',       x:2, nombre:'Medio centro' },
+  { cod:'MCI', linea:'medio',       x:3, nombre:'Medio centro izquierdo' },
+  { cod:'MI',  linea:'medio',       x:4, nombre:'Medio izquierdo' },
+  { cod:'MP',  linea:'media_punta', x:2, nombre:'Media punta' },
+  { cod:'ED',  linea:'delantero',   x:0, nombre:'Extremo derecho' },
+  { cod:'DD',  linea:'delantero',   x:1, nombre:'Delantero derecho' },
+  { cod:'DC',  linea:'delantero',   x:2, nombre:'Delantero centro' },
+  { cod:'DI',  linea:'delantero',   x:3, nombre:'Delantero izquierdo' },
+  { cod:'EI',  linea:'delantero',   x:4, nombre:'Extremo izquierdo' },
+];
+function posicionPorCodigo(cod){ return POSICIONES.find(p => p.cod === cod); }
+
+// Modo de edición de la alineación: 'jugador' (elegir posición a cada jugador)
+// o 'lineas' (añadir jugadores a cada línea en orden). Se recuerda el último usado.
+function leerModoAlineacion(){ try{ return localStorage.getItem('alevin_d_modo_alineacion') || 'jugador'; }catch(e){ return 'jugador'; } }
+function guardarModoAlineacion(m){ try{ localStorage.setItem('alevin_d_modo_alineacion', m); }catch(e){} }
+let MODO_ALINEACION = leerModoAlineacion();
+
+// Código efectivo de cada jugador en la edición actual: el corregido a mano
+// si lo hay, o el calculado por la tabla según su línea y orden.
+function codigosEdicion(n){
+  const ed = EDICION_CUARTO[n];
+  const res = {}; // jugador_id -> { linea, idx, codigo }
+  Object.keys(NOMBRE_LINEA).forEach(linea => {
+    const calc = calcularCodigos(linea, ed[linea].length) || [];
+    ed[linea].forEach((jid, idx) => {
+      res[jid] = { linea, idx, codigo: (ed.codigos && ed.codigos[jid]) || calc[idx] || '' };
+    });
+  });
+  return res;
+}
+
+// Modo por jugador: asignar (o quitar) la posición de un jugador. Se traduce
+// a la misma estructura por líneas que usa el otro modo, ordenando cada línea
+// de derecha a izquierda según la posición elegida — así ambos modos
+// comparten estado y se puede cambiar de uno a otro sin perder nada.
+function asignarPosicion(n, jugadorId, cod){
+  const ed = EDICION_CUARTO[n];
+  const actuales = codigosEdicion(n);
+  // quitar al jugador de donde estuviera
+  Object.keys(NOMBRE_LINEA).forEach(l => { ed[l] = ed[l].filter(j => j !== jugadorId); });
+  if(ed.codigos) delete ed.codigos[jugadorId];
+  if(cod){
+    const pos = posicionPorCodigo(cod);
+    if(pos.linea === 'portero'){
+      // solo un portero: el anterior (si lo hay) pasa a "no juega"
+      ed.portero.forEach(j => { if(ed.codigos) delete ed.codigos[j]; });
+      ed.portero = [];
+    }
+    ed[pos.linea].push(jugadorId);
+    ed.codigos = ed.codigos || {};
+    ed.codigos[jugadorId] = cod;
+    // reordenar la línea de derecha a izquierda según el código de cada jugador
+    const xDe = j => posicionPorCodigo(ed.codigos[j] || (actuales[j] && actuales[j].codigo))?.x ?? 2;
+    ed[pos.linea].forEach(j => { if(!ed.codigos[j] && actuales[j]) ed.codigos[j] = actuales[j].codigo; });
+    ed[pos.linea].sort((a,b) => xDe(a) - xDe(b));
+  }
+  renderResumenPorJugador(n);
+}
+
+function cambiarModoAlineacion(n, modo){
+  MODO_ALINEACION = modo;
+  guardarModoAlineacion(modo);
+  renderPartidoDetalle();
+}
+
+function textoResumenEdicion(n){
+  const ed = EDICION_CUARTO[n];
+  const cods = codigosEdicion(n);
+  const orden = ['portero','defensa','medio','media_punta','delantero'];
+  const partes = orden.filter(l => ed[l].length).map(l =>
+    ed[l].map(j => `${cods[j].codigo || '?'} ${jugadorPorId(j)?.nombre ?? '?'}`).join(' · '));
+  const total = orden.reduce((s,l) => s + ed[l].length, 0);
+  return total ? `<strong>${total} jugador(es):</strong> ${partes.join(' &nbsp;|&nbsp; ')}` : '<span class="muted">Nadie asignado todavía.</span>';
+}
+function renderResumenPorJugador(n){
+  const el = document.getElementById(`resumen-pj-${n}`);
+  if(el) el.innerHTML = textoResumenEdicion(n);
+  // marcar visualmente quién juega
+  (DETALLE.convocatoria || []).forEach(c => {
+    const fila = document.getElementById(`pj-${n}-${c.jugador_id}`);
+    const cods = codigosEdicion(n);
+    if(fila){
+      fila.style.background = cods[c.jugador_id] ? '#eff6ff' : '#fff';
+      const sel = fila.querySelector('select');
+      if(sel && sel.value !== (cods[c.jugador_id]?.codigo || '')) sel.value = cods[c.jugador_id]?.codigo || '';
+    }
+  });
+}
+
+function renderEditorPorJugador(n){
+  const convocados = jugadoresConvocados();
+  const cods = codigosEdicion(n);
+  const grupos = ['portero','defensa','medio','media_punta','delantero'].map(l =>
+    `<optgroup label="${NOMBRE_LINEA[l]}">${POSICIONES.filter(p => p.linea === l).map(p => `<option value="${p.cod}">${p.cod} — ${p.nombre}</option>`).join('')}</optgroup>`
+  ).join('');
+  const filas = convocados.map(j => {
+    const actual = cods[j.id]?.codigo || '';
+    const opciones = `<option value="">— no juega —</option>${grupos}`.replace(`value="${actual}"`, `value="${actual}" selected`);
+    return `
+      <div id="pj-${n}-${j.id}" style="display:flex;align-items:center;gap:8px;padding:5px 8px;border:1px solid var(--borde);border-radius:6px;background:${cods[j.id]?'#eff6ff':'#fff'};">
+        <span style="flex:1;min-width:0;">${j.dorsal ?? '-'} · ${j.nombre}</span>
+        <select style="width:auto;max-width:60%;" onchange="asignarPosicion(${n}, '${j.id}', this.value)">${opciones}</select>
+      </div>`;
+  }).join('');
+  return `
+    <p class="muted" style="margin-top:0;">Elige la posición de cada jugador que juega este cuarto. Portero vacío = se mantiene el del cuarto anterior.</p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:6px;">${filas || '<p class="muted">No hay convocados.</p>'}</div>
+    <p id="resumen-pj-${n}" style="font-size:13px;margin:10px 0;">${textoResumenEdicion(n)}</p>`;
+}
+
 function jugadoresConvocados(){
   return DETALLE.convocatoria.map(c => c.alevin_d_jugadores).filter(Boolean);
 }
@@ -730,8 +928,16 @@ function iniciarEdicionCuarto(n){
   if(EDICION_CUARTO[n]) return;
   const c = DETALLE.cuartos[n];
   const porLinea = { portero:[], defensa:[], medio:[], media_punta:[], delantero:[] };
+  porLinea.codigos = {};
   (c.alineacion||[]).slice().sort((a,b)=>a.orden_en_linea-b.orden_en_linea).forEach(a => {
     porLinea[a.linea].push(a.jugador_id);
+    if(a.posicion_codigo && a.posicion_codigo !== '?') porLinea.codigos[a.jugador_id] = a.posicion_codigo;
+  });
+  // Si los códigos guardados coinciden con los que da la tabla, no los tratamos
+  // como "manuales" (así al añadir/quitar jugadores se recalculan solos).
+  Object.keys(NOMBRE_LINEA).forEach(linea => {
+    const calc = calcularCodigos(linea, porLinea[linea].length) || [];
+    porLinea[linea].forEach((jid, idx) => { if(porLinea.codigos[jid] === calc[idx]) delete porLinea.codigos[jid]; });
   });
   EDICION_CUARTO[n] = porLinea;
 }
@@ -750,7 +956,7 @@ function renderCuarto(n){
     ? `${(c.row.goles_equipo ?? '?')} - ${(c.row.goles_rival ?? '?')} · ${c.goles.length} gol(es)`
     : 'sin datos guardados';
 
-  const cuerpoAlineacion = editando ? renderEditorLineasCuarto(n) : renderCampoCuarto(n);
+  const cuerpoAlineacion = editando ? renderEditorCuarto(n) : renderCampoCuarto(n);
   const golesHtml = renderGolesCuarto(n);
 
   return `
@@ -806,6 +1012,21 @@ function renderCampoCuarto(n){
     <button class="btn sec" onclick="EDITANDO_CUARTO.add(${n}); renderPartidoDetalle();">✏️ Editar alineación</button>`;
 }
 
+// Editor de alineación: selector de modo + el editor correspondiente + botones.
+function renderEditorCuarto(n){
+  const cuartoGuardado = !!DETALLE.cuartos[n].row;
+  const btnModo = (m, txt) => `<button type="button" class="btn ${MODO_ALINEACION===m?'':'sec'}" style="font-size:13px;padding:4px 10px;" onclick="cambiarModoAlineacion(${n}, '${m}')">${txt}</button>`;
+  return `
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;align-items:center;">
+      <span class="muted" style="font-size:13px;">Modo:</span>
+      ${btnModo('jugador', '👤 Por jugador')}
+      ${btnModo('lineas', '↔️ Por líneas')}
+    </div>
+    ${MODO_ALINEACION === 'jugador' ? renderEditorPorJugador(n) : renderEditorLineasCuarto(n)}
+    <button class="btn" onclick="guardarCuarto(${n}, this)">Guardar alineación del cuarto ${n}</button>
+    ${cuartoGuardado ? `<button class="btn sec" onclick="EDITANDO_CUARTO.delete(${n}); delete EDICION_CUARTO[${n}]; renderPartidoDetalle();">Cancelar edición</button>` : ''}`;
+}
+
 // Editor de líneas (el formulario clásico de añadir/quitar jugadores por línea).
 function renderEditorLineasCuarto(n){
   const c = DETALLE.cuartos[n];
@@ -813,23 +1034,25 @@ function renderEditorLineasCuarto(n){
   const convocados = jugadoresConvocados();
   const cuartoGuardado = !!c.row;
 
+  const cods = codigosEdicion(n);
   const lineasHtml = Object.keys(NOMBRE_LINEA).map(linea => {
     const seleccion = edicion[linea];
-    const codigos = calcularCodigos(linea, seleccion.length) || [];
     const chips = seleccion.map((jid, idx) => {
       const j = jugadorPorId(jid);
-      const codigo = codigos[idx] || '';
+      const codigo = cods[jid]?.codigo || '';
       const golBtn = cuartoGuardado ? `<button type="button" class="gol-rapido" title="Registrar gol de este jugador" onclick="golRapido(${n}, '${jid}')">⚽</button>` : '';
       return `<span class="chip">${j ? j.nombre : '?'}
-        <input type="text" value="${codigo}" data-linea="${linea}" data-idx="${idx}" onchange="codigoManual(${n}, this)" title="código de posición (editable)">
+        <input type="text" value="${codigo}" data-linea="${linea}" data-idx="${idx}" onchange="codigoManual(${n}, this, '${jid}')" title="código de posición (editable)">
         ${golBtn}
         <button type="button" class="chip-x" onclick="quitarDeLinea(${n}, '${linea}', ${idx})">×</button>
       </span>`;
     }).join('');
     const avisoSinTabla = seleccion.length > 0 && !calcularCodigos(linea, seleccion.length)
       ? `<p class="muted">Sin regla automática para ${seleccion.length} jugador(es) en esta línea — edita los códigos a mano.</p>` : '';
+    // Un jugador solo puede estar en una línea por cuarto (antes se podía
+    // añadir el mismo jugador a dos líneas y el guardado fallaba).
     const opciones = convocados
-      .filter(j => !seleccion.includes(j.id))
+      .filter(j => !cods[j.id])
       .map(j => `<option value="${j.id}">${j.nombre}</option>`).join('');
     const notaPortero = (linea === 'portero' && seleccion.length === 0)
       ? '<p class="muted">Vacío = se mantiene el mismo portero que en el cuarto anterior.</p>' : '';
@@ -845,10 +1068,7 @@ function renderEditorLineasCuarto(n){
       </div>`;
   }).join('');
 
-  return `
-    ${lineasHtml}
-    <button class="btn" onclick="guardarCuarto(${n}, this)">Guardar alineación del cuarto ${n}</button>
-    ${cuartoGuardado ? `<button class="btn sec" onclick="EDITANDO_CUARTO.delete(${n}); delete EDICION_CUARTO[${n}]; renderPartidoDetalle();">Cancelar edición</button>` : ''}`;
+  return lineasHtml;
 }
 
 function renderGolesCuarto(n){
@@ -872,19 +1092,31 @@ function renderGolesCuarto(n){
     </div>`;
 }
 
+// Al añadir/quitar en una línea cambia el nº de jugadores, así que los códigos
+// de esa línea se vuelven a calcular con la tabla (se descartan los manuales).
+function limpiarCodigosLinea(n, linea){
+  const ed = EDICION_CUARTO[n];
+  if(ed.codigos) ed[linea].forEach(j => delete ed.codigos[j]);
+}
 function anadirALinea(n, linea, jugadorId){
   if(!jugadorId) return;
+  limpiarCodigosLinea(n, linea);
   EDICION_CUARTO[n][linea].push(jugadorId);
   renderPartidoDetalle();
 }
 function quitarDeLinea(n, linea, idx){
-  EDICION_CUARTO[n][linea].splice(idx, 1);
+  limpiarCodigosLinea(n, linea);
+  const [quitado] = EDICION_CUARTO[n][linea].splice(idx, 1);
+  if(EDICION_CUARTO[n].codigos) delete EDICION_CUARTO[n].codigos[quitado];
   renderPartidoDetalle();
 }
-function codigoManual(n, input){
-  // El valor se lee directamente del input al guardar; no hace falta
-  // guardar estado intermedio, solo evitar que el re-render lo pierda
-  // antes de tiempo (guardarCuarto lee el DOM).
+function codigoManual(n, input, jugadorId){
+  // Se guarda en el estado de edición para que no se pierda al re-pintar
+  // ni al cambiar de modo.
+  const ed = EDICION_CUARTO[n];
+  ed.codigos = ed.codigos || {};
+  const v = input.value.trim().toUpperCase();
+  if(v) ed.codigos[jugadorId] = v; else delete ed.codigos[jugadorId];
 }
 
 // Botones +1 / -1 del marcador del cuarto. Si el cuarto ya existe en BD, se
@@ -908,52 +1140,79 @@ async function incrementarMarcador(n, campoDb, delta){
 async function guardarCuarto(n, boton){
   await conSpinner(boton, 'Guardando…', async () => {
     const edicion = EDICION_CUARTO[n];
-    let cuartoId = DETALLE.cuartos[n].row?.id;
+    const cods = codigosEdicion(n);
 
-    // Portero: si no se ha puesto ninguno, heredar el del cuarto anterior
+    // Portero: si no se ha puesto ninguno, heredar el del cuarto anterior —
+    // salvo que ese jugador ya esté colocado en otra posición en este cuarto.
     let porteroId = edicion.portero[0];
     if(!porteroId){
       for(let prev = n-1; prev >= 1; prev--){
         const anterior = (DETALLE.cuartos[prev].alineacion||[]).find(a => a.linea === 'portero');
         if(anterior){ porteroId = anterior.jugador_id; break; }
       }
+      if(porteroId && cods[porteroId]){
+        const j = jugadorPorId(porteroId);
+        alert(`No se hereda el portero del cuarto anterior (${j?.nombre ?? '?'}) porque ya está como ${cods[porteroId].codigo || NOMBRE_LINEA[cods[porteroId].linea]} en este cuarto. Elige un portero si lo hay.`);
+        porteroId = null;
+      }
+    }
+
+    // Construir todas las filas y VALIDAR antes de tocar nada en la base de datos
+    // (antes se borraba la alineación vieja y luego fallaba el insert, dejando el
+    // cuarto a medias).
+    const filasBase = [];
+    Object.keys(NOMBRE_LINEA).forEach(linea => {
+      const jugadoresLinea = linea === 'portero' ? (porteroId ? [porteroId] : []) : edicion[linea];
+      const calc = calcularCodigos(linea, jugadoresLinea.length);
+      jugadoresLinea.forEach((jid, idx) => {
+        const codigo = (edicion.codigos && edicion.codigos[jid]) || (calc ? calc[idx] : '') || '?';
+        filasBase.push({ jugador_id: jid, linea, orden_en_linea: idx+1, posicion_codigo: codigo });
+      });
+    });
+    const vistos = new Set();
+    for(const f of filasBase){
+      if(vistos.has(f.jugador_id)){
+        return alert(`${jugadorPorId(f.jugador_id)?.nombre ?? 'Un jugador'} aparece dos veces en la alineación. Quítalo de una de las posiciones antes de guardar.`);
+      }
+      vistos.add(f.jugador_id);
     }
 
     const ge = document.getElementById(`cq-ge-${n}`).value;
     const gr = document.getElementById(`cq-gr-${n}`).value;
 
-    if(!cuartoId){
-      const { data, error } = await sb.from('alevin_d_cuartos').insert({
+    try {
+      // upsert por (partido, nº de cuarto): si el cuarto ya existe en la base de
+      // datos aunque la pantalla no lo sepa (p.ej. tras un fallo anterior), se
+      // actualiza en vez de dar error de clave duplicada.
+      const { data: cuarto, error } = await sb.from('alevin_d_cuartos').upsert({
         partido_id: PARTIDO_ACTUAL, numero: n,
         goles_equipo: ge===''?null:parseInt(ge), goles_rival: gr===''?null:parseInt(gr)
-      }).select().single();
-      if(error) return alert(error.message);
-      cuartoId = data.id;
-    } else {
-      const { error } = await sb.from('alevin_d_cuartos').update({
-        goles_equipo: ge===''?null:parseInt(ge), goles_rival: gr===''?null:parseInt(gr)
-      }).eq('id', cuartoId);
-      if(error) return alert(error.message);
-    }
+      }, { onConflict: 'partido_id,numero' }).select().single();
+      if(error) throw error;
+      const cuartoId = cuarto.id;
 
-    // Reconstruir alineación completa del cuarto
-    await sb.from('alevin_d_alineacion_cuarto').delete().eq('cuarto_id', cuartoId);
-    const filas = [];
-    Object.keys(NOMBRE_LINEA).forEach(linea => {
-      let jugadoresLinea = edicion[linea];
-      if(linea === 'portero'){
-        jugadoresLinea = porteroId ? [porteroId] : [];
+      // Reconstruir alineación completa del cuarto
+      const { data: previa } = await sb.from('alevin_d_alineacion_cuarto')
+        .select('jugador_id, linea, orden_en_linea, posicion_codigo').eq('cuarto_id', cuartoId);
+      const { error: eDel } = await sb.from('alevin_d_alineacion_cuarto').delete().eq('cuarto_id', cuartoId);
+      if(eDel) throw eDel;
+      if(filasBase.length){
+        const { error: eIns } = await sb.from('alevin_d_alineacion_cuarto')
+          .insert(filasBase.map(f => ({ ...f, cuarto_id: cuartoId })));
+        if(eIns){
+          // Restaurar la alineación que había para no dejar el cuarto vacío
+          if(previa && previa.length){
+            await sb.from('alevin_d_alineacion_cuarto').insert(previa.map(f => ({ ...f, cuarto_id: cuartoId })));
+          }
+          throw eIns;
+        }
       }
-      jugadoresLinea.forEach((jid, idx) => {
-        const inputCodigo = document.querySelector(`input[data-linea="${linea}"][data-idx="${idx}"]`);
-        const codigos = calcularCodigos(linea, jugadoresLinea.length);
-        const codigo = (inputCodigo && inputCodigo.value.trim()) || (codigos ? codigos[idx] : '?');
-        filas.push({ cuarto_id: cuartoId, jugador_id: jid, linea, orden_en_linea: idx+1, posicion_codigo: codigo });
-      });
-    });
-    if(filas.length){
-      const { error } = await sb.from('alevin_d_alineacion_cuarto').insert(filas);
-      if(error) return alert(error.message);
+    } catch(err){
+      alert('No se pudo guardar el cuarto: ' + (err.message || err));
+      // Resincronizar con la base de datos, conservando lo que se estaba editando
+      await cargarDetallePartido(PARTIDO_ACTUAL);
+      renderPartidoDetalle();
+      return;
     }
     delete EDICION_CUARTO[n];
     EDITANDO_CUARTO.delete(n); // al guardar, pasa a mostrarse como campo (colapsa el editor)
