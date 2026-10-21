@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Alevín D</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bangers&display=swap" rel="stylesheet">
 <style>
   :root{
     --azul:#1d4ed8; --azul-osc:#1e3a8a; --gris:#f4f5f7; --borde:#d8dbe0;
@@ -57,6 +60,12 @@
   .gol-rapido{background:none;border:none;color:var(--verde);cursor:pointer;font-weight:bold;font-size:12px;padding:0 2px;}
   .resultado-total{font-size:20px;font-weight:700;margin:4px 0;}
 
+  .libro-tipos{display:flex;flex-wrap:wrap;gap:8px 18px;}
+  .libro-opcion{display:flex;align-items:center;gap:6px;font-size:14px;color:var(--texto);margin:0;cursor:pointer;}
+  .libro-opcion input{width:auto;}
+  .libro-paginas{display:flex;flex-direction:column;align-items:center;gap:16px;}
+  .libro-pagina{width:100%;max-width:640px;height:auto;background:#fff;border:1px solid var(--borde);box-shadow:0 2px 8px rgba(0,0,0,.15);}
+
   @media (max-width: 600px){
     header{flex-direction:column;align-items:stretch;padding:10px 12px;}
     header h1{text-align:center;margin-bottom:4px;}
@@ -105,6 +114,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script>
 /* ============================================================
    CONFIG
@@ -1398,12 +1408,23 @@ async function borrarGol(id, n){
 }
 
 /* ============================================================
-   LIBRO / PDF — pendiente
+   LIBRO DE TEMPORADA — vista previa y PDF
+   Una página por partido (cartel de convocatoria con los escudos,
+   resultado, goleadores/asistentes y 4 campos con las alineaciones)
+   y una portada por sección (tipo de partido + temporada).
+   Las páginas se dibujan en canvas (A4 a 150 ppp): lo que se ve en
+   la vista previa es exactamente lo que acaba en el PDF.
    ============================================================ */
-/* ============================================================
-   LIBRO — datos de todos los partidos, para la futura generación
-   del PDF; de momento se muestra como vista previa en la propia app.
-   ============================================================ */
+const NOMBRE_COMPLETO_EQUIPO = 'Alevín D San Cayetano';
+const FUENTE_TITULO = "'Bangers', 'Impact', 'Arial Black', sans-serif"; // tipografía de los rótulos
+const PAG_W = 1240, PAG_H = 1754; // A4 a 150 ppp
+const ORDEN_VISUAL_LINEAS = ['delantero','media_punta','medio','defensa','portero']; // arriba → abajo
+
+let LIBRO_TIPOS_SEL = null;   // Set de ids de tipo de partido seleccionados (null = todos)
+let LIBRO_DATOS = null;       // datos cargados de todos los partidos
+let LIBRO_PAGINAS = null;     // { clave, paginas:[dataUrl], titulo }
+let LIBRO_GENERANDO = false;
+
 async function cargarDatosLibro(){
   const idsPartidos = PARTIDOS.map(p => p.id);
   if(!idsPartidos.length) return { cuartosPorPartido: {}, noConvocadosPorPartido: {} };
@@ -1433,52 +1454,435 @@ async function cargarDatosLibro(){
   });
   return { cuartosPorPartido, noConvocadosPorPartido };
 }
-async function renderLibro(){
-  const main = document.getElementById('main');
-  main.innerHTML = '<p class="muted">Cargando libro de temporada…</p>';
-  const { cuartosPorPartido, noConvocadosPorPartido } = await cargarDatosLibro();
-  const partidosOrdenados = PARTIDOS.slice().sort((a,b) => (a.fecha||'').localeCompare(b.fecha||''));
-  const secciones = partidosOrdenados.map(p => {
-    const cuartos = (cuartosPorPartido[p.id] || []).sort((a,b) => a.numero - b.numero);
-    const totalGe = cuartos.reduce((s,c)=> s + (c.goles_equipo||0), 0);
-    const totalGr = cuartos.reduce((s,c)=> s + (c.goles_rival||0), 0);
-    const hayDatosCuartos = cuartos.some(c => c.goles_equipo != null || c.goles_rival != null);
-    const resultadoTexto = (p.goles_favor!=null && p.goles_contra!=null)
-      ? `Resultado oficial: ${textoMarcador(p, p.goles_favor, p.goles_contra, true)}`
-      : (hayDatosCuartos ? `Resultado (según cuartos): ${textoMarcador(p, totalGe, totalGr, true)}` : 'Resultado: sin datos');
-    const cuartosHtml = cuartos.map(c => {
-      const porLinea = {};
-      c.alineacion.forEach(a => {
-        if(!porLinea[a.linea]) porLinea[a.linea] = [];
-        porLinea[a.linea].push(a);
-      });
-      const lineasTexto = Object.keys(NOMBRE_LINEA)
-        .filter(l => porLinea[l] && porLinea[l].length)
-        .map(l => `<strong>${NOMBRE_LINEA[l]}:</strong> ` + porLinea[l].slice().sort((a,b)=>a.orden_en_linea-b.orden_en_linea).map(a => `${a.posicion_codigo||'?'} ${a.alevin_d_jugadores?.nombre??'?'}`).join(', '))
-        .join('<br>');
-      const golesTexto = c.goles.map(g => `⚽ ${g.autor?.nombre??'?'}${g.asistente ? ' (asist. '+g.asistente.nombre+')' : ''}`).join('<br>') || '<span class="muted">Sin goles</span>';
-      return `
-        <div class="linea-box">
-          <strong>Cuarto ${c.numero}</strong> — ${textoMarcador(p, c.goles_equipo, c.goles_rival)}
-          <p style="margin:6px 0;">${lineasTexto || '<span class="muted">Sin alineación guardada</span>'}</p>
-          <p style="margin:6px 0;">${golesTexto}</p>
-        </div>`;
-    }).join('') || '<p class="muted">Sin cuartos registrados.</p>';
-    return `
-      <div class="card">
-        <h3 style="margin-bottom:4px;">${p.rival} — ${p.fecha} <span class="badge ${(p.alevin_d_tipos_partido?.nombre||'').toLowerCase()}">${p.alevin_d_tipos_partido?.nombre??''}</span></h3>
-        <p class="muted" style="margin-top:0;">${p.condicion ?? ''} ${p.hora ? '· '+p.hora : ''} · ${resultadoTexto}</p>
-        ${(noConvocadosPorPartido[p.id] || []).length ? `<p style="margin:0 0 8px;font-size:13px;"><strong>No convocados:</strong> ${noConvocadosPorPartido[p.id].map(r => `${r.alevin_d_jugadores?.nombre ?? '?'} (${r.alevin_d_motivos_no_convocatoria?.nombre ?? '?'})`).join(', ')}</p>` : ''}
-        ${cuartosHtml}
-      </div>`;
-  }).join('') || '<p class="muted">Aún no hay partidos con los que generar el libro.</p>';
 
+/* ---------- temporada, secciones y títulos ---------- */
+function temporadaDeFecha(fecha){
+  const d = new Date((fecha || '') + 'T00:00:00');
+  if(isNaN(d)) return '';
+  const anio = d.getFullYear();
+  const ini = d.getMonth() >= 6 ? anio : anio - 1; // la temporada empieza en julio/agosto
+  const dos = n => String(n % 100).padStart(2, '0');
+  return `${dos(ini)}-${dos(ini + 1)}`;
+}
+function tituloSeccionLibro(tipo, temporada){
+  // "Pretemporada Temporada 26-27 Alevín D San Cayetano" · "Liga 26-27 Alevín D San Cayetano"
+  const prefijo = /pretemporada/i.test(tipo) ? `${tipo} Temporada` : tipo;
+  return `${prefijo} ${temporada} ${NOMBRE_COMPLETO_EQUIPO}`.replace(/\s+/g, ' ').trim();
+}
+function construirSeccionesLibro(tiposSel){
+  const grupos = {};
+  PARTIDOS.forEach(p => {
+    if(tiposSel && !tiposSel.has(p.tipo_partido_id)) return;
+    const tipo = p.alevin_d_tipos_partido?.nombre ?? 'Partidos';
+    const temp = temporadaDeFecha(p.fecha);
+    const clave = tipo + '|' + temp;
+    (grupos[clave] ||= { tipo, temporada: temp, partidos: [] }).partidos.push(p);
+  });
+  const secciones = Object.values(grupos);
+  secciones.forEach(s => s.partidos.sort((a,b) => (a.fecha||'').localeCompare(b.fecha||'') || (a.hora||'').localeCompare(b.hora||'')));
+  secciones.sort((a,b) => (a.partidos[0].fecha||'').localeCompare(b.partidos[0].fecha||''));
+  secciones.forEach(s => {
+    s.titulo = tituloSeccionLibro(s.tipo, s.temporada);
+    // líneas de la portada: "Pretemporada Temporada" / "26-27" / "Alevín D San Cayetano"
+    s.lineasPortada = [/pretemporada/i.test(s.tipo) ? `${s.tipo} Temporada` : s.tipo, s.temporada, NOMBRE_COMPLETO_EQUIPO].filter(Boolean);
+  });
+  return secciones;
+}
+function resultadoPartidoLibro(p, cuartos){
+  if(p.goles_favor != null && p.goles_contra != null) return { ge: p.goles_favor, gr: p.goles_contra, ok: true };
+  const hay = cuartos.some(c => c.goles_equipo != null || c.goles_rival != null);
+  if(!hay) return { ge: null, gr: null, ok: false };
+  return { ge: cuartos.reduce((s,c)=> s + (c.goles_equipo||0), 0), gr: cuartos.reduce((s,c)=> s + (c.goles_rival||0), 0), ok: true };
+}
+
+/* ---------- utilidades de dibujo ---------- */
+function trazoRedondeado(ctx, x, y, w, h, r){
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+function recortarTexto(ctx, texto, maxW){
+  if(ctx.measureText(texto).width <= maxW) return texto;
+  let t = texto;
+  while(t.length > 1 && ctx.measureText(t + '…').width > maxW) t = t.slice(0, -1);
+  return t + '…';
+}
+// Reduce el tamaño de fuente hasta que el texto cabe en maxW.
+function fuenteAjustada(ctx, texto, familia, tamMax, tamMin, maxW, peso){
+  let tam = tamMax;
+  do { ctx.font = `${peso || ''} ${tam}px ${familia}`.trim(); tam -= 2; }
+  while(ctx.measureText(texto).width > maxW && tam >= tamMin);
+  return tam + 2;
+}
+function partirEnLineas(ctx, texto, maxW){
+  const palabras = texto.split(' ');
+  const lineas = [];
+  let actual = '';
+  palabras.forEach(pal => {
+    const prueba = actual ? actual + ' ' + pal : pal;
+    if(ctx.measureText(prueba).width > maxW && actual){ lineas.push(actual); actual = pal; }
+    else actual = prueba;
+  });
+  if(actual) lineas.push(actual);
+  return lineas;
+}
+// Letras "de cartel": relleno, contorno y sombra.
+function textoCartel(ctx, texto, x, y, relleno, contorno, grosor, sombra){
+  ctx.save();
+  ctx.lineJoin = 'round';
+  if(sombra){ ctx.shadowColor = 'rgba(0,0,0,.45)'; ctx.shadowBlur = 0; ctx.shadowOffsetX = 4; ctx.shadowOffsetY = 6; }
+  if(contorno && grosor){ ctx.lineWidth = grosor; ctx.strokeStyle = contorno; ctx.strokeText(texto, x, y); }
+  ctx.shadowColor = 'transparent';
+  ctx.fillStyle = relleno;
+  ctx.fillText(texto, x, y);
+  ctx.restore();
+}
+function nuevoLienzo(){
+  const canvas = document.createElement('canvas');
+  canvas.width = PAG_W; canvas.height = PAG_H;
+  return { canvas, ctx: canvas.getContext('2d') };
+}
+function canvasADataUrl(canvas){ return canvas.toDataURL('image/jpeg', 0.88); }
+
+/* ---------- portada de sección ---------- */
+function dibujarPortadaSeccion(seccion){
+  const { canvas, ctx } = nuevoLienzo();
+  const g = ctx.createLinearGradient(0, 0, 0, PAG_H);
+  g.addColorStop(0, '#1e3a8a'); g.addColorStop(1, '#0b1b4d');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, PAG_W, PAG_H);
+  // franjas decorativas
+  ctx.save();
+  ctx.globalAlpha = .08; ctx.fillStyle = '#fff';
+  for(let i = -2; i < 12; i++){ ctx.save(); ctx.translate(i * 220, 0); ctx.rotate(-0.35); ctx.fillRect(0, -200, 90, PAG_H * 1.6); ctx.restore(); }
+  ctx.restore();
+  // marco
+  ctx.strokeStyle = '#fbbf24'; ctx.lineWidth = 10; trazoRedondeado(ctx, 50, 50, PAG_W - 100, PAG_H - 100, 40); ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,255,255,.6)'; ctx.lineWidth = 3; trazoRedondeado(ctx, 74, 74, PAG_W - 148, PAG_H - 148, 30); ctx.stroke();
+  // balón
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.font = '170px sans-serif'; ctx.fillText('⚽', PAG_W / 2, 480);
+  // título en letras de cartel
+  const maxW = PAG_W - 260;
+  const lineas = seccion.lineasPortada;
+  // cada línea con el mayor tamaño que le quepa (la 1ª, más grande; la del equipo, algo menor)
+  const maxTam = [190, 230, 110];
+  let y = 560;
+  lineas.forEach((l, i) => {
+    const tam = fuenteAjustada(ctx, l, FUENTE_TITULO, maxTam[i] || 110, 40, maxW);
+    ctx.font = `${tam}px ${FUENTE_TITULO}`;
+    y += tam * 0.95; // la línea base va debajo de la anterior
+    const col = i === 1 ? '#ffffff' : '#fde047';
+    textoCartel(ctx, l, PAG_W / 2, y, col, '#0b1b4d', Math.max(10, tam * .12), true);
+    y += tam * 0.12 + 24;
+  });
+  // pie
+  ctx.font = `46px ${FUENTE_TITULO}`;
+  textoCartel(ctx, `${seccion.partidos.length} ${seccion.partidos.length === 1 ? 'partido' : 'partidos'}`, PAG_W / 2, PAG_H - 160, '#ffffff', '#0b1b4d', 8, false);
+  return canvasADataUrl(canvas);
+}
+
+/* ---------- campo con la alineación de un cuarto ---------- */
+function dibujarCampoCuarto(ctx, x, y, w, h, numero, cuarto, p){
+  // cabecera del cuarto
+  const altCab = 46;
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.font = `38px ${FUENTE_TITULO}`;
+  textoCartel(ctx, `CUARTO ${numero}`, x, y + altCab / 2, '#1e3a8a', null, 0, false);
+  if(cuarto && (cuarto.goles_equipo != null || cuarto.goles_rival != null)){
+    ctx.textAlign = 'right';
+    textoCartel(ctx, textoMarcador(p, cuarto.goles_equipo, cuarto.goles_rival), x + w, y + altCab / 2, '#15803d', null, 0, false);
+  }
+  const cy = y + altCab, ch = h - altCab;
+  const g = ctx.createLinearGradient(0, cy, 0, cy + ch);
+  g.addColorStop(0, '#22a04a'); g.addColorStop(1, '#166b30');
+  ctx.fillStyle = g; trazoRedondeado(ctx, x, cy, w, ch, 18); ctx.fill();
+  // marcas del campo
+  ctx.save();
+  trazoRedondeado(ctx, x, cy, w, ch, 18); ctx.clip();
+  ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = 3;
+  ctx.strokeRect(x + 14, cy + 14, w - 28, ch - 28);
+  ctx.beginPath(); ctx.moveTo(x + 14, cy + ch / 2); ctx.lineTo(x + w - 14, cy + ch / 2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(x + w / 2, cy + ch / 2, ch * .13, 0, Math.PI * 2); ctx.stroke();
+  ctx.strokeRect(x + w * .3, cy + ch - 14 - ch * .16, w * .4, ch * .16); // área propia (abajo)
+  ctx.strokeRect(x + w * .3, cy + 14, w * .4, ch * .16);
+  ctx.restore();
+
+  const al = cuarto?.alineacion || [];
+  if(!al.length){
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = '26px system-ui, sans-serif'; ctx.fillStyle = 'rgba(255,255,255,.85)';
+    ctx.fillText(cuarto ? 'Sin alineación guardada' : 'Cuarto no jugado', x + w / 2, cy + ch / 2);
+    return;
+  }
+  const porLinea = {};
+  al.slice().sort((a,b) => a.orden_en_linea - b.orden_en_linea).forEach(a => { (porLinea[a.linea] ||= []).push(a); });
+  const lineas = ORDEN_VISUAL_LINEAS.filter(l => porLinea[l] && porLinea[l].length);
+  const pillH = Math.min(62, (ch - 36) / lineas.length - 8);
+  const margen = 22;
+  lineas.forEach((l, i) => {
+    const filaY = cy + margen + (ch - 2 * margen - pillH) * (lineas.length === 1 ? .5 : i / (lineas.length - 1));
+    const jugs = porLinea[l].slice().reverse(); // el primero introducido va a la derecha
+    const n = jugs.length;
+    const pillW = Math.min(124, (w - 2 * margen - (n - 1) * 8) / n);
+    const total = n * pillW + (n - 1) * 8;
+    let px = x + (w - total) / 2;
+    jugs.forEach(a => {
+      ctx.fillStyle = 'rgba(255,255,255,.94)';
+      trazoRedondeado(ctx, px, filaY, pillW, pillH, 10); ctx.fill();
+      ctx.strokeStyle = '#1d4ed8'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      ctx.fillStyle = '#1e3a8a'; ctx.font = `bold ${Math.round(pillH * .31)}px system-ui, sans-serif`;
+      ctx.fillText(a.posicion_codigo || '?', px + pillW / 2, filaY + pillH * .38);
+      ctx.fillStyle = '#1f2430'; ctx.font = `${Math.round(pillH * .30)}px system-ui, sans-serif`;
+      ctx.fillText(recortarTexto(ctx, a.alevin_d_jugadores?.nombre ?? '?', pillW - 8), px + pillW / 2, filaY + pillH * .8);
+      px += pillW + 8;
+    });
+  });
+}
+
+/* ---------- página de un partido ---------- */
+function dibujarPaginaPartido(seccion, p, cuartos, noConv, imgCartel){
+  const { canvas, ctx } = nuevoLienzo();
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, PAG_W, PAG_H);
+  const mx = 70; const anchoUtil = PAG_W - 2 * mx;
+
+  // banda superior con el título de la sección
+  const gb = ctx.createLinearGradient(0, 0, PAG_W, 0);
+  gb.addColorStop(0, '#1e3a8a'); gb.addColorStop(1, '#1d4ed8');
+  ctx.fillStyle = gb; ctx.fillRect(0, 0, PAG_W, 78);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const tamBanda = fuenteAjustada(ctx, seccion.titulo, FUENTE_TITULO, 46, 24, PAG_W - 120);
+  ctx.font = `${tamBanda}px ${FUENTE_TITULO}`;
+  textoCartel(ctx, seccion.titulo, PAG_W / 2, 42, '#fde047', '#0b1b4d', 6, false);
+
+  // cartel de la convocatoria (con los escudos y el rótulo del partido)
+  let y = 100;
+  if(imgCartel){
+    const maxH = 470;
+    const esc = Math.min(anchoUtil / imgCartel.width, maxH / imgCartel.height);
+    const w = imgCartel.width * esc, h = imgCartel.height * esc;
+    const x = (PAG_W - w) / 2;
+    ctx.save(); ctx.shadowColor = 'rgba(0,0,0,.25)'; ctx.shadowBlur = 14; ctx.shadowOffsetY = 4;
+    ctx.fillStyle = '#fff'; trazoRedondeado(ctx, x, y, w, h, 16); ctx.fill(); ctx.restore();
+    ctx.save(); trazoRedondeado(ctx, x, y, w, h, 16); ctx.clip(); ctx.drawImage(imgCartel, x, y, w, h); ctx.restore();
+    y += h + 26;
+  } else {
+    // sin cartel: rótulo de texto
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    const t = `${NOMBRE_EQUIPO} vs ${p.rival}`;
+    ctx.font = `${fuenteAjustada(ctx, t, FUENTE_TITULO, 96, 40, anchoUtil)}px ${FUENTE_TITULO}`;
+    textoCartel(ctx, t, PAG_W / 2, y + 110, '#1e3a8a', '#fde047', 8, true);
+    y += 170;
+  }
+
+  // fecha / hora / condición
+  const f = p.fecha ? new Date(p.fecha + 'T00:00:00').toLocaleDateString('es-ES', { weekday:'long', day:'numeric', month:'long', year:'numeric' }) : '';
+  const info = [f, p.hora ? p.hora.slice(0,5) + ' h' : '', p.condicion ? (p.condicion === 'fuera' ? 'Fuera' : 'Casa') : ''].filter(Boolean).join('  ·  ');
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.font = '30px system-ui, sans-serif'; ctx.fillStyle = '#475569';
+  ctx.fillText(info.charAt(0).toUpperCase() + info.slice(1), PAG_W / 2, y + 22);
+  y += 56;
+
+  // resultado (el equipo local siempre primero)
+  const r = resultadoPartidoLibro(p, cuartos);
+  const fuera = p.condicion === 'fuera';
+  const nombreLocal = fuera ? p.rival : NOMBRE_EQUIPO;
+  const nombreVisit = fuera ? NOMBRE_EQUIPO : p.rival;
+  const marcador = r.ok ? textoMarcador(p, r.ge, r.gr) : '? - ?';
+  ctx.font = `130px ${FUENTE_TITULO}`;
+  const anchoMarc = ctx.measureText(marcador).width;
+  const cx = PAG_W / 2;
+  textoCartel(ctx, marcador, cx, y + 105, '#1e3a8a', '#fde047', 10, true);
+  const maxNom = (anchoUtil - anchoMarc) / 2 - 30;
+  ctx.textAlign = 'right';
+  ctx.font = `${fuenteAjustada(ctx, nombreLocal, FUENTE_TITULO, 54, 26, maxNom)}px ${FUENTE_TITULO}`;
+  textoCartel(ctx, nombreLocal, cx - anchoMarc / 2 - 24, y + 90, '#1f2430', null, 0, false);
+  ctx.textAlign = 'left';
+  ctx.font = `${fuenteAjustada(ctx, nombreVisit, FUENTE_TITULO, 54, 26, maxNom)}px ${FUENTE_TITULO}`;
+  textoCartel(ctx, nombreVisit, cx + anchoMarc / 2 + 24, y + 90, '#1f2430', null, 0, false);
+  if(r.ok && !(p.goles_favor != null && p.goles_contra != null)){
+    ctx.textAlign = 'center'; ctx.font = '22px system-ui, sans-serif'; ctx.fillStyle = '#94a3b8';
+    ctx.fillText('(suma de los cuartos)', cx, y + 138);
+  }
+  y += 160;
+
+  // goleadores y asistentes
+  const goles = [];
+  cuartos.slice().sort((a,b) => a.numero - b.numero).forEach(c => c.goles.forEach(g => goles.push({ c: c.numero, g })));
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  ctx.font = `40px ${FUENTE_TITULO}`;
+  textoCartel(ctx, 'GOLES', mx, y + 30, '#15803d', null, 0, false);
+  let yg = y + 62;
+  const colW = anchoUtil / 2;
+  const tamLinea = goles.length > 10 ? 26 : 30;
+  const paso = tamLinea + 12;
+  ctx.font = `${tamLinea}px system-ui, sans-serif`; ctx.fillStyle = '#1f2430';
+  if(!goles.length){
+    ctx.fillStyle = '#94a3b8'; ctx.fillText(r.ok && (r.ge === 0 || r.ge == null) ? 'Sin goles de Alevín D' : 'Sin goles registrados', mx, yg + 20);
+    yg += paso;
+  } else {
+    const porCol = Math.ceil(goles.length / 2);
+    goles.forEach((it, i) => {
+      const col = i < porCol ? 0 : 1;
+      const fila = i < porCol ? i : i - porCol;
+      const gx = mx + col * colW, gy = yg + 20 + fila * paso;
+      const autor = it.g.autor?.nombre ?? '?';
+      ctx.fillStyle = '#1f2430'; ctx.font = `bold ${tamLinea}px system-ui, sans-serif`;
+      const pre = `⚽ ${autor}`;
+      ctx.fillText(recortarTexto(ctx, pre, colW - 20), gx, gy);
+      if(it.g.asistente){
+        const w0 = ctx.measureText(pre).width;
+        ctx.fillStyle = '#475569'; ctx.font = `${tamLinea - 2}px system-ui, sans-serif`;
+        const txt = ` (asist. ${it.g.asistente.nombre}) · C${it.c}`;
+        if(w0 + ctx.measureText(txt).width < colW - 20) ctx.fillText(txt, gx + w0, gy);
+        else ctx.fillText(recortarTexto(ctx, txt, Math.max(40, colW - 20 - w0)), gx + w0, gy);
+      } else {
+        const w0 = ctx.measureText(pre).width;
+        ctx.fillStyle = '#475569'; ctx.font = `${tamLinea - 2}px system-ui, sans-serif`;
+        ctx.fillText(` · C${it.c}`, gx + w0, gy);
+      }
+    });
+    yg += Math.ceil(goles.length / 2) * paso;
+  }
+  y = yg + 8;
+
+  // no convocados
+  if(noConv && noConv.length){
+    ctx.font = '22px system-ui, sans-serif'; ctx.fillStyle = '#64748b'; ctx.textAlign = 'left';
+    const txt = 'No convocados: ' + noConv.map(r2 => `${r2.alevin_d_jugadores?.nombre ?? '?'}${r2.alevin_d_motivos_no_convocatoria?.nombre ? ' (' + r2.alevin_d_motivos_no_convocatoria.nombre + ')' : ''}`).join(', ');
+    partirEnLineas(ctx, txt, anchoUtil).slice(0, 2).forEach((l, i) => ctx.fillText(l, mx, y + 20 + i * 28));
+    y += 8 + Math.min(2, partirEnLineas(ctx, txt, anchoUtil).length) * 28 + 8;
+  }
+
+  // 4 campos (2 × 2)
+  const finY = PAG_H - 50;
+  const gap = 30;
+  const celdaW = (anchoUtil - gap) / 2;
+  const celdaH = (finY - y - gap) / 2;
+  for(let n = 1; n <= 4; n++){
+    const col = (n - 1) % 2, fila = Math.floor((n - 1) / 2);
+    const cuarto = cuartos.find(c => c.numero === n);
+    dibujarCampoCuarto(ctx, mx + col * (celdaW + gap), y + fila * (celdaH + gap), celdaW, celdaH, n, cuarto, p);
+  }
+  return canvasADataUrl(canvas);
+}
+
+/* ---------- generación ---------- */
+async function descargarCartel(path){
+  if(!path) return null;
+  try {
+    const { data, error } = await sb.storage.from('alevin-d-fotos').download(path);
+    if(error || !data) return null;
+    return await createImageBitmap(data);
+  } catch(e){ return null; }
+}
+function claveSeleccionLibro(){
+  return [...(LIBRO_TIPOS_SEL || [])].sort().join(',');
+}
+async function generarPaginasLibro(progreso){
+  try { await document.fonts.load(`64px Bangers`); } catch(e){}
+  if(!LIBRO_DATOS) LIBRO_DATOS = await cargarDatosLibro();
+  const secciones = construirSeccionesLibro(LIBRO_TIPOS_SEL);
+  const total = secciones.reduce((s, sec) => s + 1 + sec.partidos.length, 0);
+  const paginas = [];
+  let hecho = 0;
+  for(const sec of secciones){
+    paginas.push(dibujarPortadaSeccion(sec));
+    progreso(++hecho, total);
+    for(const p of sec.partidos){
+      const cuartos = (LIBRO_DATOS.cuartosPorPartido[p.id] || []).slice().sort((a,b) => a.numero - b.numero);
+      const img = await descargarCartel(p.foto_convocatoria_path);
+      paginas.push(dibujarPaginaPartido(sec, p, cuartos, LIBRO_DATOS.noConvocadosPorPartido[p.id], img));
+      if(img && img.close) img.close();
+      progreso(++hecho, total);
+      await new Promise(r => setTimeout(r, 0)); // deja respirar a la interfaz
+    }
+  }
+  return paginas;
+}
+function seleccionTiposLibro(){
+  const marcados = [...document.querySelectorAll('.libro-tipo:checked')].map(c => parseInt(c.value, 10));
+  LIBRO_TIPOS_SEL = new Set(marcados);
+  return LIBRO_TIPOS_SEL;
+}
+async function prepararLibro(boton, estadoId){
+  const sel = seleccionTiposLibro();
+  const estado = document.getElementById(estadoId);
+  if(!sel.size){ estado.innerHTML = '<div class="aviso">Marca al menos un tipo de partido.</div>'; return null; }
+  if(LIBRO_GENERANDO) return null;
+  LIBRO_GENERANDO = true;
+  try {
+    estado.innerHTML = '<span class="spinner" style="border-color:#777;"></span><span id="libro-prog">Preparando…</span>';
+    LIBRO_DATOS = await cargarDatosLibro(); // siempre datos frescos
+    const paginas = await generarPaginasLibro((h, t) => {
+      const el = document.getElementById('libro-prog'); if(el) el.textContent = `Dibujando página ${h} de ${t}…`;
+    });
+    LIBRO_PAGINAS = { clave: claveSeleccionLibro(), paginas };
+    estado.innerHTML = `<div class="ok">Libro listo: ${paginas.length} páginas.</div>`;
+    return LIBRO_PAGINAS;
+  } catch(e){
+    estado.innerHTML = `<div class="aviso">No se pudo generar el libro: ${e.message}</div>`;
+    return null;
+  } finally { LIBRO_GENERANDO = false; }
+}
+async function verLibro(boton){
+  await conSpinner(boton, 'Generando…', async () => {
+    const libro = await prepararLibro(boton, 'libro-estado');
+    if(!libro) return;
+    document.getElementById('libro-paginas').innerHTML = libro.paginas.map((src, i) =>
+      `<img class="libro-pagina" src="${src}" alt="Página ${i + 1}">`).join('');
+  });
+}
+async function descargarLibroPdf(boton){
+  if(!window.jspdf){ return alert('No se ha cargado la librería de PDF (jsPDF). Comprueba la conexión y recarga.'); }
+  await conSpinner(boton, 'Generando PDF…', async () => {
+    let libro = LIBRO_PAGINAS;
+    const sel = seleccionTiposLibro();
+    if(!libro || libro.clave !== claveSeleccionLibro()) libro = await prepararLibro(boton, 'libro-estado');
+    if(!libro) return;
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait', compress: true });
+    libro.paginas.forEach((src, i) => {
+      if(i > 0) doc.addPage();
+      doc.addImage(src, 'JPEG', 0, 0, 210, 297, undefined, 'FAST');
+    });
+    const nombresTipos = TIPOS_PARTIDO.filter(t => sel.has(t.id)).map(t => t.nombre).join('-');
+    const nombre = `Libro Alevin D ${sel.size === TIPOS_PARTIDO.length ? 'completo' : nombresTipos}.pdf`.replace(/[^\w .-]/g, '');
+    doc.save(nombre);
+  });
+}
+function marcarTodosTiposLibro(marcar){
+  document.querySelectorAll('.libro-tipo').forEach(c => { c.checked = marcar; });
+}
+
+function renderLibro(){
+  const main = document.getElementById('main');
+  const conteo = {};
+  PARTIDOS.forEach(p => { conteo[p.tipo_partido_id] = (conteo[p.tipo_partido_id] || 0) + 1; });
+  const selActual = LIBRO_TIPOS_SEL;
+  const checks = TIPOS_PARTIDO.map(t => `
+    <label class="libro-opcion">
+      <input type="checkbox" class="libro-tipo" value="${t.id}" ${(!selActual || selActual.has(t.id)) ? 'checked' : ''} ${conteo[t.id] ? '' : 'disabled'}>
+      ${t.nombre} <span class="muted">(${conteo[t.id] || 0})</span>
+    </label>`).join('');
   main.innerHTML = `
     <div class="card">
       <h2>Libro de temporada</h2>
-      <p class="muted">Vista previa con todo lo guardado hasta ahora, partido a partido. Es el primer paso hacia el PDF final (que añadirá diseño, estadísticas de la plantilla y la separación amistosos/liga) — de momento sirve para comprobar que la información está completa.</p>
+      <p class="muted" style="margin-top:0;">Una página por partido —con el cartel de la convocatoria (escudos), el resultado, los goleadores y asistentes y las alineaciones de los 4 cuartos—, ordenados por fecha y agrupados en secciones por tipo de partido. Elige qué tipos incluir:</p>
+      <div class="libro-tipos">${checks || '<span class="muted">Aún no hay tipos de partido.</span>'}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0;">
+        <button class="btn sec" type="button" onclick="marcarTodosTiposLibro(true)">Todos</button>
+        <button class="btn sec" type="button" onclick="marcarTodosTiposLibro(false)">Ninguno</button>
+        <button class="btn" type="button" onclick="verLibro(this)">👁 Ver libro</button>
+        <button class="btn" type="button" style="background:#15803d;" onclick="descargarLibroPdf(this)">⬇ Descargar PDF</button>
+      </div>
+      <div id="libro-estado"></div>
     </div>
-    ${secciones}`;
+    <div id="libro-paginas" class="libro-paginas"></div>`;
 }
 
 /* ============================================================

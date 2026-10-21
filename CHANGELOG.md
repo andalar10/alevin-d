@@ -2,6 +2,14 @@
 
 Histórico funcional del proyecto (qué cambia para el usuario, no detalles técnicos de implementación).
 
+## 2026-10-21 (4) — Libro de temporada con páginas por partido y descarga en PDF
+
+- **Una página por partido**: arriba el cartel de la convocatoria del partido (con los escudos y el rótulo del equipo), la fecha/hora/condición, el resultado en grande (con el equipo local primero), la lista de goleadores y asistentes con el cuarto en que se marcó, y debajo **4 dibujos de campo, uno por cuarto**, con la alineación (código y nombre de cada jugador, portero abajo) y el marcador del cuarto. Si el partido no tiene cartel, se pone un rótulo con los nombres de los equipos. Se mantiene la línea de "No convocados" con su motivo.
+- **Portada por sección** con letras de cartel: "Pretemporada Temporada 26-27 Alevín D San Cayetano", "Liga 26-27 Alevín D San Cayetano", etc. La temporada se deduce de la fecha de los partidos (la nueva temporada empieza en julio) y los partidos van ordenados por fecha dentro de cada sección.
+- **Elegir qué incluir**: casillas por tipo de partido (con el número de partidos de cada uno), botones "Todos" / "Ninguno", "👁 Ver libro" para ver las páginas en la app y "⬇ Descargar PDF" para bajarlo (A4, una página por partido). Se pueden marcar uno o varios tipos.
+- Los escudos no se suben aparte: salen del propio cartel de convocatoria de cada partido.
+- Se sustituye la antigua vista previa en texto del libro.
+
 ## 2026-10-21 (3) — Goleadores bajo el resultado y resumen de cuartos jugados
 
 - **Goleadores y asistentes bajo el resultado**: en la ficha del partido, justo debajo del resultado total, aparece la lista de todos los goles del partido en orden. Cada gol indica el autor, el asistente si lo hay y el cuarto en que se marcó (p.ej. "⚽ Jaime · asist. Noa (C1)").

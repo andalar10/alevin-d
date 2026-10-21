@@ -35,7 +35,7 @@ El portero de un cuarto, si se deja vacío, se hereda del cuarto anterior del mi
 
 ## Pendiente
 
-- Generador de PDF del libro de temporada (jsPDF, siguiendo el patrón ya usado en el proyecto Fútbol Jueves Mundial): una sección por partido con alineaciones esquemáticas por cuarto, goles/asistencias, y estadísticas finales (más cuartos jugados, más goles, más asistencias) separadas por tipo de partido.
+- Estadísticas finales del libro (más cuartos jugados, más goles, más asistencias) separadas por tipo de partido: pendiente de añadir al libro/PDF. (El libro por partidos y el PDF ya están hechos: ver `renderLibro`, `dibujarPaginaPartido`, `descargarLibroPdf`.)
 - Reconocimiento de convocatoria/alineación a partir de foto (como `extraer-alineacion` en Fútbol Jueves Mundial): de momento se prueba la entrada manual; si resulta incómoda, se añadirá una Edge Function con Claude Vision para extraerlo directamente de la foto que envía el entrenador.
 
 ## Estado de la vista de cuartos (desde 2026-09-12)
@@ -66,6 +66,10 @@ Las líneas se pintan de arriba a abajo en el orden `['delantero','media_punta',
 
 - `renderEstadisticas`/`cargarEstadisticas`/`calcularEstadisticasJugadores`: una única consulta a `alevin_d_alineacion_cuarto` (con `alevin_d_cuartos(goles_rival)` embebido) y otra a `alevin_d_goles`, agregadas en memoria por `jugador_id`. Cuartos de portero cuentan goles encajados sumando `goles_rival` de los cuartos en los que ese jugador jugó en la línea `portero`.
 - `renderLibro`/`cargarDatosLibro`: de momento es una vista previa en HTML dentro de la propia app (no un PDF), con toda la información de cada partido — resultado, alineación por cuarto y goles/asistencias. Pendiente: generar el PDF real (jsPDF, ver patrón ya usado en Fútbol Jueves Mundial) a partir de estos mismos datos, añadiendo estadísticas de equipo y diseño.
+
+## Libro de temporada (PDF)
+
+Las páginas se dibujan en canvas A4 (1240×1754 px) y se usan tanto para la vista previa como para el PDF (jsPDF, `cdnjs`). Los escudos NO se almacenan aparte: se usa la foto del cartel de convocatoria (`foto_convocatoria_path`, bucket `alevin-d-fotos`) como cabecera de cada página. Los rótulos usan la fuente Google `Bangers` (constante `FUENTE_TITULO`; cámbiala ahí y en el `<link>` del `<head>` si se quiere otra). Título de sección: `tituloSeccionLibro` ("Pretemporada" lleva el añadido "Temporada"); nombre del equipo en `NOMBRE_COMPLETO_EQUIPO`.
 
 ## Histórico de decisiones
 
