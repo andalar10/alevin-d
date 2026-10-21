@@ -2,6 +2,13 @@
 
 Histórico funcional del proyecto (qué cambia para el usuario, no detalles técnicos de implementación).
 
+## 2026-10-21 (3) — Goleadores bajo el resultado y resumen de cuartos jugados
+
+- **Goleadores y asistentes bajo el resultado**: en la ficha del partido, justo debajo del resultado total, aparece la lista de todos los goles del partido en orden. Cada gol indica el autor, el asistente si lo hay y el cuarto en que se marcó (p.ej. "⚽ Jaime · asist. Noa (C1)").
+- **Resumen de cuartos jugados al final de la ficha**: un bloque "📊 Resumen: cuartos jugados" agrupa a los jugadores según cuántos cuartos han jugado (4, 3, 2, 1 o 0). Cada grupo lleva un círculo de color con el número, de verde (4 cuartos) a naranja (1), y gris para los convocados que no han jugado. Así se ve de un vistazo quién ha jugado menos.
+  - Junto al nombre aparece 🧤 con el número de cuartos jugados de portero, si es el caso.
+  - El resumen se calcula a partir de las alineaciones guardadas y solo aparece cuando hay al menos un cuarto con alineación.
+
 ## 2026-10-21 (2) — Motivo de no convocatoria
 
 - **Motivo de no convocatoria por jugador**: en la convocatoria de cada partido, debajo de cada jugador que no está marcado aparece un desplegable para indicar por qué no viene. Las opciones son "Decisión técnica", "Enfermedad", "Viaje" y "+ Otro nuevo…". Esta última pide el nombre del nuevo motivo, lo añade a la lista para siempre y lo deja seleccionado. Indicar el motivo es opcional.

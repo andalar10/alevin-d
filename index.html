@@ -664,6 +664,7 @@ function renderPartidoDetalle(){
         </div>
         <p class="muted" style="margin-top:0;">${p.alevin_d_tipos_partido?.nombre ?? ''} · ${p.condicion ?? ''} ${p.hora ? '· '+p.hora : ''}</p>
         ${totalHtml}
+        ${renderGoleadoresPartido()}
       </div>`}
       <div class="fila">
         ${ordenCasa(p,
@@ -700,8 +701,64 @@ function renderPartidoDetalle(){
       </div>
     </details>
     ${cuartosHtml}
+    ${renderResumenCuartosJugados()}
   `;
 }
+// Lista de goles del partido (todos los cuartos), bajo el resultado.
+function renderGoleadoresPartido(){
+  const goles = [];
+  for(let n=1; n<=4; n++){
+    (DETALLE.cuartos[n].goles || []).slice()
+      .sort((a,b) => (a.created_at||'').localeCompare(b.created_at||''))
+      .forEach(g => goles.push({ ...g, cuarto: n }));
+  }
+  if(!goles.length) return '';
+  const items = goles.map(g => `
+    <li>⚽ <strong>${g.autor?.nombre ?? '?'}</strong>${g.asistente ? ` <span class="muted">· asist. ${g.asistente.nombre}</span>` : ''} <span class="muted" style="font-size:12px;">(C${g.cuarto})</span></li>`).join('');
+  return `<ul style="list-style:none;padding:0;margin:4px 0 10px;font-size:14px;line-height:1.6;">${items}</ul>`;
+}
+
+// Resumen al final de la ficha: cuántos cuartos ha jugado cada convocado,
+// agrupado por nº de cuartos (4, 3, 2, 1, 0) para verlo de un vistazo.
+function renderResumenCuartosJugados(){
+  const conteo = {};   // jugador_id -> nº de cuartos
+  const porteria = {}; // jugador_id -> nº de cuartos de portero
+  let hayAlineaciones = false;
+  for(let n=1; n<=4; n++){
+    const al = DETALLE.cuartos[n].alineacion || [];
+    if(al.length) hayAlineaciones = true;
+    new Set(al.map(a => a.jugador_id)).forEach(jid => { conteo[jid] = (conteo[jid] || 0) + 1; });
+    al.filter(a => a.linea === 'portero').forEach(a => { porteria[a.jugador_id] = (porteria[a.jugador_id] || 0) + 1; });
+  }
+  if(!hayAlineaciones) return '';
+  // convocados + cualquiera que haya jugado (por si se desconvocó después)
+  const ids = new Set([...DETALLE.convocatoria.map(c => c.jugador_id), ...Object.keys(conteo)]);
+  const grupos = { 4:[], 3:[], 2:[], 1:[], 0:[] };
+  ids.forEach(jid => {
+    const j = jugadorPorId(jid) || DETALLE.convocatoria.find(c => c.jugador_id === jid)?.alevin_d_jugadores;
+    const k = Math.min(conteo[jid] || 0, 4);
+    grupos[k].push({ nombre: j?.nombre ?? '?', dorsal: j?.dorsal, gk: porteria[jid] || 0 });
+  });
+  const colores = { 4:'#15803d', 3:'#65a30d', 2:'#ca8a04', 1:'#ea580c', 0:'#9ca3af' };
+  const filas = [4,3,2,1,0].filter(k => grupos[k].length).map(k => {
+    const chips = grupos[k].sort((a,b) => (a.dorsal ?? 99) - (b.dorsal ?? 99)).map(j =>
+      `<span class="chip" style="border-color:${colores[k]};">${j.dorsal ?? '-'} · ${j.nombre}${j.gk ? ` <span class="muted" style="font-size:11px;margin-left:4px;">🧤${j.gk}</span>` : ''}</span>`).join('');
+    return `
+      <div style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--borde);">
+        <div style="flex:0 0 auto;width:44px;height:44px;border-radius:50%;background:${colores[k]};color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1;">
+          <span style="font-size:18px;font-weight:700;">${k}</span><span style="font-size:9px;">${k===1?'cuarto':'cuartos'}</span>
+        </div>
+        <div class="chips" style="flex:1;">${chips}</div>
+      </div>`;
+  }).join('');
+  return `
+    <div class="card">
+      <h3 style="margin-top:0;">📊 Resumen: cuartos jugados</h3>
+      ${filas}
+      <p class="muted" style="font-size:12px;margin-bottom:0;">🧤 = cuartos jugados de portero. Se cuenta a partir de las alineaciones guardadas.</p>
+    </div>`;
+}
+
 function renderEditorDatosPartido(p){
   const opcionesTipo = TIPOS_PARTIDO.map(t => `<option value="${t.id}" ${t.id===p.tipo_partido_id?'selected':''}>${t.nombre}</option>`).join('');
   const esc = v => String(v ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
