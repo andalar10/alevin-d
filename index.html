@@ -145,6 +145,7 @@ let SESSION = null;
 let JUGADORES = [];
 let TIPOS_PARTIDO = [];
 let TIPOS_JUGADOR = [];
+let MOTIVOS_NO_CONVOCATORIA = []; // catálogo editable (Decisión técnica, Enfermedad, Viaje, …)
 let PARTIDOS = [];
 let VISTA = 'jugadores';
 let PARTIDO_ACTUAL = null; // id del partido abierto en detalle
@@ -171,6 +172,26 @@ async function conSpinner(boton, textoCargando, fn){
    último partido abierto, para no volver siempre a "Jugadores"
    tras recargar, y para el acceso directo "Partido actual".
    ============================================================ */
+/* ============================================================
+   MARCADOR — siempre se muestra primero el equipo que juega en casa
+   ============================================================ */
+const NOMBRE_EQUIPO = 'Alevín D';
+// nuestros = goles de Alevín D, suyos = goles del rival. Si jugamos fuera,
+// el rival es el local y va primero.
+function textoMarcador(p, nuestros, suyos, conNombres){
+  const fuera = p?.condicion === 'fuera';
+  const a = nuestros ?? '?', b = suyos ?? '?';
+  if(conNombres){
+    const rival = p?.rival ?? 'Rival';
+    return fuera ? `${rival} ${b} - ${a} ${NOMBRE_EQUIPO}` : `${NOMBRE_EQUIPO} ${a} - ${b} ${rival}`;
+  }
+  return fuera ? `${b} - ${a}` : `${a} - ${b}`;
+}
+// Devuelve [htmlLocal, htmlVisitante] a partir del html de "nuestro" campo y el del rival.
+function ordenCasa(p, htmlNuestro, htmlRival){
+  return p?.condicion === 'fuera' ? [htmlRival, htmlNuestro] : [htmlNuestro, htmlRival];
+}
+
 function guardarVista(vista){ try{ localStorage.setItem('alevin_d_vista', vista); }catch(e){} }
 function leerVistaGuardada(){ try{ return localStorage.getItem('alevin_d_vista'); }catch(e){ return null; } }
 function guardarPartidoActualId(id){ try{ localStorage.setItem('alevin_d_partido_actual_id', id); }catch(e){} }
@@ -254,7 +275,7 @@ function pintarAuth(){
    CARGA DE DATOS
    ============================================================ */
 async function cargarTodo(){
-  await Promise.all([cargarTiposJugador(), cargarTiposPartido()]);
+  await Promise.all([cargarTiposJugador(), cargarTiposPartido(), cargarMotivosNoConvocatoria()]);
   await cargarJugadores();
   await cargarPartidos();
   actualizarBotonPartidoActual();
@@ -275,6 +296,10 @@ async function cargarJugadores(){
 async function cargarTiposPartido(){
   const { data, error } = await sb.from('alevin_d_tipos_partido').select('*').order('id');
   if(!error) TIPOS_PARTIDO = data;
+}
+async function cargarMotivosNoConvocatoria(){
+  const { data, error } = await sb.from('alevin_d_motivos_no_convocatoria').select('*').order('id');
+  if(!error) MOTIVOS_NO_CONVOCATORIA = data;
 }
 async function cargarTiposJugador(){
   const { data, error } = await sb.from('alevin_d_tipos_jugador').select('*').order('id');
@@ -431,9 +456,9 @@ function renderPartidos(){
     const resumen = RESUMEN_CUARTOS_POR_PARTIDO[p.id];
     let resultadoHtml = '';
     if(p.goles_favor!=null && p.goles_contra!=null){
-      resultadoHtml = `<span class="muted"> · Resultado: ${p.goles_favor} - ${p.goles_contra}</span>`;
+      resultadoHtml = `<span class="muted"> · Resultado: ${textoMarcador(p, p.goles_favor, p.goles_contra, true)}</span>`;
     } else if(resumen && resumen.tiene){
-      resultadoHtml = `<span class="muted"> · Parcial (cuartos): ${resumen.ge} - ${resumen.gr}</span>`;
+      resultadoHtml = `<span class="muted"> · Parcial (cuartos): ${textoMarcador(p, resumen.ge, resumen.gr, true)}</span>`;
     }
     const destacado = leerPartidoActualId() === p.id ? 'style="border-left:3px solid var(--azul);padding-left:9px;"' : '';
     return `
@@ -508,6 +533,18 @@ async function crearPartido(boton){
    PARTIDO — detalle (convocatoria, foto, 4 cuartos)
    ============================================================ */
 let DETALLE = null; // { partido, convocatoria:[{jugador_id,dorsal_partido,jugador}], cuartos:{1:{...},2:...} }
+// Convocatoria: abierta mientras el partido no ha empezado a registrarse;
+// en cuanto hay algún cuarto guardado se muestra plegada. Si el usuario la
+// abre/cierra a mano se respeta, hasta que cambie el estado del partido.
+let CONVOCATORIA_MANUAL = null; // { iniciado, abierta }
+function partidoIniciado(){
+  return !!DETALLE && [1,2,3,4].some(n => DETALLE.cuartos[n] && DETALLE.cuartos[n].row);
+}
+function convocatoriaAbierta(){
+  const iniciado = partidoIniciado();
+  if(CONVOCATORIA_MANUAL && CONVOCATORIA_MANUAL.iniciado === iniciado) return CONVOCATORIA_MANUAL.abierta;
+  return !iniciado;
+}
 let FOTO_ABIERTA = false; // la foto de convocatoria se muestra plegada por defecto, como los cuartos
 let EDITANDO_DATOS_PARTIDO = false; // panel "Editar datos" (rival, fecha, hora, condición, tipo) abierto
 
@@ -523,6 +560,7 @@ async function abrirPartido(id){
   actualizarBotonPartidoActual();
   DETALLE = null;
   EDITANDO_DATOS_PARTIDO = false;
+  CONVOCATORIA_MANUAL = null;
   renderPartidoDetalle(); // muestra "Cargando…" mientras llegan los datos
   await cargarDetallePartido(id);
   renderPartidoDetalle();
@@ -531,10 +569,11 @@ async function cargarDetallePartido(id){
   // Todo en paralelo (antes se pedía 1 fila por cuarto en serie: hasta 9
   // idas y vueltas seguidas — esto era la causa de la lentitud al abrir un partido).
   const partidoLocal = PARTIDOS.find(p => p.id === id);
-  const [partidoRes, convRes, cuartosRes] = await Promise.all([
+  const [partidoRes, convRes, cuartosRes, noConvRes] = await Promise.all([
     partidoLocal ? Promise.resolve({ data: partidoLocal }) : sb.from('alevin_d_partidos').select('*, alevin_d_tipos_partido(nombre)').eq('id', id).single(),
     sb.from('alevin_d_convocatoria').select('*, alevin_d_jugadores(*)').eq('partido_id', id),
-    sb.from('alevin_d_cuartos').select('*').eq('partido_id', id).order('numero')
+    sb.from('alevin_d_cuartos').select('*').eq('partido_id', id).order('numero'),
+    sb.from('alevin_d_no_convocados').select('jugador_id, motivo_id').eq('partido_id', id)
   ]);
   const partido = partidoRes.data;
   const conv = convRes.data;
@@ -565,7 +604,9 @@ async function cargarDetallePartido(id){
     const { data: firmada } = await sb.storage.from('alevin-d-fotos').createSignedUrl(partido.foto_convocatoria_path, 3600);
     fotoUrl = firmada?.signedUrl || null;
   }
-  DETALLE = { partido, convocatoria: conv || [], cuartos, fotoUrl };
+  const noConvocados = {}; // jugador_id -> motivo_id
+  (noConvRes.data || []).forEach(r => { noConvocados[r.jugador_id] = r.motivo_id; });
+  DETALLE = { partido, convocatoria: conv || [], cuartos, fotoUrl, noConvocados };
 }
 function jugadorPorId(id){ return JUGADORES.find(j => j.id === id); }
 
@@ -587,18 +628,29 @@ function renderPartidoDetalle(){
   const convocados = new Set(DETALLE.convocatoria.map(c => c.jugador_id));
   const activos = JUGADORES.filter(j => j.activo || convocados.has(j.id));
   const todosMarcados = activos.length > 0 && activos.every(j => convocados.has(j.id));
-  const filasJugadores = activos.map(j => `
-    <label style="display:flex;align-items:center;gap:8px;font-weight:normal;padding:5px 8px;border:1px solid var(--borde);border-radius:6px;background:${convocados.has(j.id)?'#eff6ff':'#fff'};">
-      <input type="checkbox" ${convocados.has(j.id)?'checked':''} onchange="toggleConvocado('${j.id}', this.checked)">
-      <span>${j.dorsal ?? '-'} · ${nombreConAlias(j)}</span>
-    </label>`).join('');
+  const noConv = DETALLE.noConvocados || {};
+  const filasJugadores = activos.map(j => {
+    const esta = convocados.has(j.id);
+    const motivoId = noConv[j.id];
+    const opcionesMotivo = `<option value="">— motivo (opcional) —</option>`
+      + MOTIVOS_NO_CONVOCATORIA.map(m => `<option value="${m.id}" ${m.id===motivoId?'selected':''}>${m.nombre}</option>`).join('')
+      + `<option value="__nuevo">+ Otro nuevo…</option>`;
+    return `
+    <div style="padding:5px 8px;border:1px solid var(--borde);border-radius:6px;background:${esta?'#eff6ff':'#fff'};">
+      <label style="display:flex;align-items:center;gap:8px;font-weight:normal;margin:0;">
+        <input type="checkbox" ${esta?'checked':''} onchange="toggleConvocado('${j.id}', this.checked)">
+        <span>${j.dorsal ?? '-'} · ${nombreConAlias(j)}</span>
+      </label>
+      ${esta ? '' : `<select style="margin-top:4px;font-size:12px;padding:3px 6px;" onchange="guardarMotivoNoConvocatoria('${j.id}', this)">${opcionesMotivo}</select>`}
+    </div>`;
+  }).join('');
 
   let cuartosHtml = '';
   for(let n=1; n<=4; n++) cuartosHtml += renderCuarto(n);
 
   const total = totalCuartos();
   const totalHtml = total
-    ? `<p class="resultado-total">⚽ ${total.ge} - ${total.gr} <span class="muted" style="font-size:13px;font-weight:400;">(suma de cuartos)</span></p>`
+    ? `<p class="resultado-total">⚽ ${textoMarcador(p, total.ge, total.gr, true)} <span class="muted" style="font-size:13px;font-weight:400;">(suma de cuartos)</span></p>`
     : '';
 
   main.innerHTML = `
@@ -614,8 +666,10 @@ function renderPartidoDetalle(){
         ${totalHtml}
       </div>`}
       <div class="fila">
-        <div><label>Goles a favor (resultado oficial)</label><input id="pd-gf" type="number" value="${p.goles_favor ?? ''}"></div>
-        <div><label>Goles en contra (resultado oficial)</label><input id="pd-gc" type="number" value="${p.goles_contra ?? ''}"></div>
+        ${ordenCasa(p,
+          `<div><label>Goles ${NOMBRE_EQUIPO} (resultado oficial)</label><input id="pd-gf" type="number" value="${p.goles_favor ?? ''}"></div>`,
+          `<div><label>Goles ${p.rival} (resultado oficial)</label><input id="pd-gc" type="number" value="${p.goles_contra ?? ''}"></div>`
+        ).join('')}
         <div style="align-self:flex-end;"><button class="btn sec" onclick="guardarResultadoFinal(this)">Guardar resultado</button></div>
       </div>
       <details style="margin-top:12px;" ${FOTO_ABIERTA ? 'open' : ''} ontoggle="FOTO_ABIERTA = this.open;">
@@ -633,8 +687,9 @@ function renderPartidoDetalle(){
         <button class="btn danger" style="margin-top:8px;font-size:12px;padding:4px 10px;" onclick="eliminarPartido(this)">Eliminar partido</button>
       </details>
     </div>
-    <div class="card">
-      <h3>Convocatoria</h3>
+    <details class="card" style="padding:0;" ${convocatoriaAbierta() ? 'open' : ''} ontoggle="CONVOCATORIA_MANUAL = { iniciado: partidoIniciado(), abierta: this.open };">
+      <summary style="cursor:pointer;padding:16px;font-weight:600;font-size:15px;">👥 Convocatoria <span class="muted" style="font-weight:normal;">— ${convocados.size} convocado(s)</span></summary>
+      <div style="padding:0 16px 16px;">
       <button class="btn sec" style="margin-bottom:8px;" onclick="toggleTodosConvocados(${todosMarcados}, this)">${todosMarcados ? 'Desmarcar todos' : 'Marcar todos'}</button>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:6px;">${filasJugadores}</div>
       <div class="fila" style="margin-top:10px;">
@@ -642,7 +697,8 @@ function renderPartidoDetalle(){
         <div><input id="pd-temporal-dorsal" type="number" placeholder="Dorsal (opcional)"></div>
         <div><button class="btn sec" onclick="anadirTemporalYConvocar(this)">+ Añadir temporal y convocar</button></div>
       </div>
-    </div>
+      </div>
+    </details>
     ${cuartosHtml}
   `;
 }
@@ -717,6 +773,8 @@ async function toggleConvocado(jugadorId, marcado){
   if(marcado){
     const { error } = await sb.from('alevin_d_convocatoria').insert({ partido_id: PARTIDO_ACTUAL, jugador_id: jugadorId });
     if(error) return alert(error.message);
+    // si estaba anotado como no convocado, se quita el motivo
+    await sb.from('alevin_d_no_convocados').delete().eq('partido_id', PARTIDO_ACTUAL).eq('jugador_id', jugadorId);
   } else {
     const { error } = await sb.from('alevin_d_convocatoria').delete().eq('partido_id', PARTIDO_ACTUAL).eq('jugador_id', jugadorId);
     if(error) return alert(error.message);
@@ -736,11 +794,41 @@ async function toggleTodosConvocados(desmarcar, boton){
         const { error } = await sb.from('alevin_d_convocatoria')
           .insert(faltan.map(j => ({ partido_id: PARTIDO_ACTUAL, jugador_id: j.id })));
         if(error) return alert(error.message);
+        await sb.from('alevin_d_no_convocados').delete().eq('partido_id', PARTIDO_ACTUAL).in('jugador_id', faltan.map(j => j.id));
       }
     }
     await cargarDetallePartido(PARTIDO_ACTUAL);
     renderPartidoDetalle();
   });
+}
+// Motivo de no convocatoria de un jugador en el partido actual. "+ Otro nuevo…"
+// pide el nombre, lo añade al catálogo y lo deja seleccionado.
+async function guardarMotivoNoConvocatoria(jugadorId, select){
+  let valor = select.value;
+  if(valor === '__nuevo'){
+    const nombre = (prompt('Nuevo motivo de no convocatoria:') || '').trim();
+    if(!nombre){ select.value = DETALLE.noConvocados?.[jugadorId] ?? ''; return; }
+    const existente = MOTIVOS_NO_CONVOCATORIA.find(m => m.nombre.toLowerCase() === nombre.toLowerCase());
+    if(existente){ valor = String(existente.id); }
+    else {
+      const { data, error } = await sb.from('alevin_d_motivos_no_convocatoria').insert({ nombre }).select().single();
+      if(error){ select.value = ''; return alert(error.message); }
+      await cargarMotivosNoConvocatoria();
+      valor = String(data.id);
+    }
+  }
+  select.disabled = true;
+  let error;
+  if(!valor){
+    ({ error } = await sb.from('alevin_d_no_convocados').delete().eq('partido_id', PARTIDO_ACTUAL).eq('jugador_id', jugadorId));
+  } else {
+    ({ error } = await sb.from('alevin_d_no_convocados').upsert(
+      { partido_id: PARTIDO_ACTUAL, jugador_id: jugadorId, motivo_id: parseInt(valor) },
+      { onConflict: 'partido_id,jugador_id' }));
+  }
+  if(error){ select.disabled = false; return alert(error.message); }
+  await cargarDetallePartido(PARTIDO_ACTUAL);
+  renderPartidoDetalle();
 }
 async function anadirTemporalYConvocar(boton){
   const nombre = document.getElementById('pd-temporal-nombre').value.trim();
@@ -953,7 +1041,7 @@ function renderCuarto(n){
   if(editando) iniciarEdicionCuarto(n);
 
   const resumen = c.row
-    ? `${(c.row.goles_equipo ?? '?')} - ${(c.row.goles_rival ?? '?')} · ${c.goles.length} gol(es)`
+    ? `${textoMarcador(DETALLE.partido, c.row.goles_equipo, c.row.goles_rival)} · ${c.goles.length} gol(es)`
     : 'sin datos guardados';
 
   const cuerpoAlineacion = editando ? renderEditorCuarto(n) : renderCampoCuarto(n);
@@ -964,20 +1052,23 @@ function renderCuarto(n){
       <summary style="cursor:pointer;padding:16px;font-weight:600;font-size:15px;">Cuarto ${n} <span class="muted" style="font-weight:normal;">— ${resumen}</span></summary>
       <div style="padding:0 16px 16px;">
         <div class="fila">
-          <div><label>Goles equipo</label>
+${ordenCasa(DETALLE.partido, `
+          <div><label>Goles ${NOMBRE_EQUIPO}</label>
             <div style="display:flex;gap:6px;align-items:center;">
               <input id="cq-ge-${n}" type="number" value="${c.row?.goles_equipo ?? ''}" style="flex:1;">
               <button type="button" class="btn sec" onclick="incrementarMarcador(${n}, 'goles_equipo', 1)">+1</button>
               <button type="button" class="btn sec" onclick="incrementarMarcador(${n}, 'goles_equipo', -1)">-1</button>
             </div>
           </div>
-          <div><label>Goles rival</label>
+`, `
+          <div><label>Goles ${DETALLE.partido.rival}</label>
             <div style="display:flex;gap:6px;align-items:center;">
               <input id="cq-gr-${n}" type="number" value="${c.row?.goles_rival ?? ''}" style="flex:1;">
               <button type="button" class="btn sec" onclick="incrementarMarcador(${n}, 'goles_rival', 1)">+1</button>
               <button type="button" class="btn sec" onclick="incrementarMarcador(${n}, 'goles_rival', -1)">-1</button>
             </div>
           </div>
+`).join('')}
         </div>
         <h4 style="margin-bottom:4px;">Alineación</h4>
         ${cuerpoAlineacion}
@@ -1258,7 +1349,11 @@ async function borrarGol(id, n){
    ============================================================ */
 async function cargarDatosLibro(){
   const idsPartidos = PARTIDOS.map(p => p.id);
-  if(!idsPartidos.length) return { cuartosPorPartido: {} };
+  if(!idsPartidos.length) return { cuartosPorPartido: {}, noConvocadosPorPartido: {} };
+  const { data: noConv } = await sb.from('alevin_d_no_convocados')
+    .select('partido_id, alevin_d_jugadores(nombre), alevin_d_motivos_no_convocatoria(nombre)').in('partido_id', idsPartidos);
+  const noConvocadosPorPartido = {};
+  (noConv || []).forEach(r => { (noConvocadosPorPartido[r.partido_id] ||= []).push(r); });
   const { data: cuartos } = await sb.from('alevin_d_cuartos').select('*').in('partido_id', idsPartidos).order('numero');
   const idsCuartos = (cuartos||[]).map(c => c.id);
   let alineaciones = [], goles = [];
@@ -1279,12 +1374,12 @@ async function cargarDatosLibro(){
       goles: goles.filter(g => g.cuarto_id === c.id)
     });
   });
-  return { cuartosPorPartido };
+  return { cuartosPorPartido, noConvocadosPorPartido };
 }
 async function renderLibro(){
   const main = document.getElementById('main');
   main.innerHTML = '<p class="muted">Cargando libro de temporada…</p>';
-  const { cuartosPorPartido } = await cargarDatosLibro();
+  const { cuartosPorPartido, noConvocadosPorPartido } = await cargarDatosLibro();
   const partidosOrdenados = PARTIDOS.slice().sort((a,b) => (a.fecha||'').localeCompare(b.fecha||''));
   const secciones = partidosOrdenados.map(p => {
     const cuartos = (cuartosPorPartido[p.id] || []).sort((a,b) => a.numero - b.numero);
@@ -1292,8 +1387,8 @@ async function renderLibro(){
     const totalGr = cuartos.reduce((s,c)=> s + (c.goles_rival||0), 0);
     const hayDatosCuartos = cuartos.some(c => c.goles_equipo != null || c.goles_rival != null);
     const resultadoTexto = (p.goles_favor!=null && p.goles_contra!=null)
-      ? `Resultado oficial: ${p.goles_favor} - ${p.goles_contra}`
-      : (hayDatosCuartos ? `Resultado (según cuartos): ${totalGe} - ${totalGr}` : 'Resultado: sin datos');
+      ? `Resultado oficial: ${textoMarcador(p, p.goles_favor, p.goles_contra, true)}`
+      : (hayDatosCuartos ? `Resultado (según cuartos): ${textoMarcador(p, totalGe, totalGr, true)}` : 'Resultado: sin datos');
     const cuartosHtml = cuartos.map(c => {
       const porLinea = {};
       c.alineacion.forEach(a => {
@@ -1307,7 +1402,7 @@ async function renderLibro(){
       const golesTexto = c.goles.map(g => `⚽ ${g.autor?.nombre??'?'}${g.asistente ? ' (asist. '+g.asistente.nombre+')' : ''}`).join('<br>') || '<span class="muted">Sin goles</span>';
       return `
         <div class="linea-box">
-          <strong>Cuarto ${c.numero}</strong> — ${c.goles_equipo ?? '?'} - ${c.goles_rival ?? '?'}
+          <strong>Cuarto ${c.numero}</strong> — ${textoMarcador(p, c.goles_equipo, c.goles_rival)}
           <p style="margin:6px 0;">${lineasTexto || '<span class="muted">Sin alineación guardada</span>'}</p>
           <p style="margin:6px 0;">${golesTexto}</p>
         </div>`;
@@ -1316,6 +1411,7 @@ async function renderLibro(){
       <div class="card">
         <h3 style="margin-bottom:4px;">${p.rival} — ${p.fecha} <span class="badge ${(p.alevin_d_tipos_partido?.nombre||'').toLowerCase()}">${p.alevin_d_tipos_partido?.nombre??''}</span></h3>
         <p class="muted" style="margin-top:0;">${p.condicion ?? ''} ${p.hora ? '· '+p.hora : ''} · ${resultadoTexto}</p>
+        ${(noConvocadosPorPartido[p.id] || []).length ? `<p style="margin:0 0 8px;font-size:13px;"><strong>No convocados:</strong> ${noConvocadosPorPartido[p.id].map(r => `${r.alevin_d_jugadores?.nombre ?? '?'} (${r.alevin_d_motivos_no_convocatoria?.nombre ?? '?'})`).join(', ')}</p>` : ''}
         ${cuartosHtml}
       </div>`;
   }).join('') || '<p class="muted">Aún no hay partidos con los que generar el libro.</p>';
@@ -1416,6 +1512,7 @@ function guardarUltimoTipoPartido(id){
    ============================================================ */
 let TIPO_PARTIDO_EN_EDICION = null;
 let TIPO_JUGADOR_EN_EDICION = null;
+let MOTIVO_EN_EDICION = null;
 
 function filasCatalogo(items, enEdicionId, prefijo, fnGuardar, fnEliminar, fnEditar){
   return items.map(t => {
@@ -1443,10 +1540,12 @@ function filasCatalogo(items, enEdicionId, prefijo, fnGuardar, fnEliminar, fnEdi
 }
 function editarTipoPartido(id){ TIPO_PARTIDO_EN_EDICION = id; renderAdmin(); }
 function editarTipoJugador(id){ TIPO_JUGADOR_EN_EDICION = id; renderAdmin(); }
+function editarMotivo(id){ MOTIVO_EN_EDICION = id; renderAdmin(); }
 
 function renderAdmin(){
   const filasPartido = filasCatalogo(TIPOS_PARTIDO, TIPO_PARTIDO_EN_EDICION, 'at', 'guardarTipoPartido', 'eliminarTipoPartido', 'editarTipoPartido');
   const filasJugador = filasCatalogo(TIPOS_JUGADOR, TIPO_JUGADOR_EN_EDICION, 'aj', 'guardarTipoJugador', 'eliminarTipoJugador', 'editarTipoJugador');
+  const filasMotivo = filasCatalogo(MOTIVOS_NO_CONVOCATORIA, MOTIVO_EN_EDICION, 'am', 'guardarMotivo', 'eliminarMotivo', 'editarMotivo');
   document.getElementById('main').innerHTML = `
     <div class="card">
       <h2>Admin · Tipos de partido</h2>
@@ -1470,6 +1569,17 @@ function renderAdmin(){
         <div><button class="btn" onclick="crearTipoJugadorAdmin()">Añadir</button></div>
       </div>
       <p class="muted">Solo los jugadores de tipo "Fijo" se marcan automáticamente en la convocatoria de un partido nuevo.</p>
+    </div>
+    <div class="card">
+      <h2>Admin · Motivos de no convocatoria</h2>
+      <div class="tabla-wrap"><table>
+        <thead><tr><th>Nombre</th><th></th></tr></thead>
+        <tbody>${filasMotivo || '<tr><td colspan="2" class="muted">Sin motivos.</td></tr>'}</tbody>
+      </table></div>
+      <div class="fila" style="margin-top:10px;">
+        <div><input id="am-nuevo" placeholder="Nuevo motivo (p.ej. Lesión)"></div>
+        <div><button class="btn" onclick="crearMotivoAdmin()">Añadir</button></div>
+      </div>
     </div>
     <div class="card">
       <h2>Admin · Cuenta</h2>
@@ -1528,6 +1638,32 @@ async function eliminarTipoJugador(id){
   const { error } = await sb.from('alevin_d_tipos_jugador').delete().eq('id', id);
   if(error) return alert(error.message);
   await cargarTiposJugador();
+  renderAdmin();
+}
+async function crearMotivoAdmin(){
+  const nombre = document.getElementById('am-nuevo').value.trim();
+  if(!nombre) return alert('Falta el nombre');
+  const { error } = await sb.from('alevin_d_motivos_no_convocatoria').insert({ nombre });
+  if(error) return alert(error.message);
+  await cargarMotivosNoConvocatoria();
+  renderAdmin();
+}
+async function guardarMotivo(id){
+  const nombre = document.getElementById(`am-nombre-${id}`).value.trim();
+  if(!nombre) return alert('Falta el nombre');
+  const { error } = await sb.from('alevin_d_motivos_no_convocatoria').update({ nombre }).eq('id', id);
+  if(error) return alert(error.message);
+  MOTIVO_EN_EDICION = null;
+  await cargarMotivosNoConvocatoria();
+  renderAdmin();
+}
+async function eliminarMotivo(id){
+  const { count } = await sb.from('alevin_d_no_convocados').select('id', { count:'exact', head:true }).eq('motivo_id', id);
+  if(count > 0){ alert(`No se puede eliminar: se ha usado en ${count} caso(s). Edítalo en vez de borrarlo.`); return; }
+  if(!confirm('¿Eliminar este motivo?')) return;
+  const { error } = await sb.from('alevin_d_motivos_no_convocatoria').delete().eq('id', id);
+  if(error) return alert(error.message);
+  await cargarMotivosNoConvocatoria();
   renderAdmin();
 }
 

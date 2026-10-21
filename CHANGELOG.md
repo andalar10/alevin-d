@@ -2,6 +2,37 @@
 
 Histórico funcional del proyecto (qué cambia para el usuario, no detalles técnicos de implementación).
 
+## 2026-10-21 (2) — Motivo de no convocatoria
+
+- **Motivo de no convocatoria por jugador**: en la convocatoria de cada partido, debajo de cada jugador que no está marcado aparece un desplegable para indicar por qué no viene. Las opciones son "Decisión técnica", "Enfermedad", "Viaje" y "+ Otro nuevo…". Esta última pide el nombre del nuevo motivo, lo añade a la lista para siempre y lo deja seleccionado. Indicar el motivo es opcional.
+- Si después se convoca a ese jugador, el motivo se borra solo. Lo mismo pasa al usar "Marcar todos".
+- **Nueva sección en Admin, "Motivos de no convocatoria"**, para añadir, renombrar o eliminar motivos. Igual que con los tipos de partido y de jugador, solo se pueden eliminar los que no se han usado nunca.
+- **En el libro de temporada**, cada partido muestra la línea "No convocados: Nombre (motivo), …" cuando se ha anotado algún motivo.
+
+## 2026-10-21 — Convocatoria plegable y marcador con el equipo local primero
+
+- **Convocatoria plegable**: en la ficha del partido, el bloque de convocatoria se puede plegar y desplegar igual que los cuartos, y en la cabecera muestra cuántos jugadores hay convocados. Mientras el partido no tiene ningún cuarto guardado aparece abierto (para preparar la convocatoria). En cuanto se guarda el primer cuarto aparece plegado, para que no estorbe durante el partido. Si se abre o cierra a mano, se respeta mientras se sigue en el partido.
+- **El equipo local siempre va primero en el resultado**: si jugamos en casa se muestra "Alevín D 2 - 1 Rival"; si jugamos fuera, "Rival 1 - 2 Alevín D". Se aplica en el listado de partidos, en el resultado total de la ficha, en el resumen de cada cuarto y en el libro de temporada.
+  - Los campos para introducir goles (el resultado oficial y el marcador de cada cuarto) siguen también ese orden y llevan el nombre de cada equipo ("Goles Alevín D" / "Goles <rival>") en vez de "a favor/en contra" o "equipo/rival", para no confundirse al jugar fuera.
+  - No cambia nada de lo guardado: solo el orden en que se muestra.
+
+## 2026-09-29 (2) — Alineación por jugador, foto plegable y corrección de errores al guardar cuartos
+
+- **Nuevo modo de alineación "👤 Por jugador"**: al editar la alineación de un cuarto se elige, junto a cada convocado, su posición (GK, LD, DCD, DCC, DCI, LI, MD, MCD, MC, MCI, MI, MP, ED, DD, DC, DI, EI) o "no juega". La app deduce sola la línea y el orden derecha→izquierda. Debajo se ve un resumen en vivo de quién juega y dónde.
+- **Se mantiene el modo clásico "↔️ Por líneas"** (añadir jugadores a cada línea en orden). Se cambia de uno a otro con dos botones encima del editor, sin perder lo que ya esté puesto, y la app recuerda el último modo usado.
+- Los códigos de posición corregidos a mano ya no se pierden al volver a editar un cuarto ni al cambiar de modo.
+- **Foto de convocatoria plegable**: en la ficha del partido la foto aparece plegada por defecto (como los cuartos) y se despliega al pulsar. Al subir una foto nueva se despliega sola para verla.
+- **Corregidos los errores de "clave duplicada" al guardar un cuarto** (vistos el 26/09 por la mañana en el cuarto 1). Qué pasaba:
+  1. Se podía poner al mismo jugador en dos líneas del mismo cuarto; al guardar, la base de datos lo rechazaba, pero el cuarto ya se había creado a medias.
+  2. La pantalla no se enteraba de que el cuarto ya existía, así que cada nuevo intento de guardar trataba de crearlo otra vez y fallaba siempre con el mismo error, hasta recargar la página.
+  Ahora un jugador colocado en una línea ya no aparece para añadirlo en otra, y antes de guardar se comprueba que nadie esté repetido. Si el cuarto ya existe se actualiza en vez de intentar crearlo de nuevo. Si algo falla, se restaura la alineación anterior y la pantalla se resincroniza con lo guardado sin perder lo que se estaba editando.
+  Además, el portero heredado del cuarto anterior ya no se añade si ese jugador está jugando en otra posición en este cuarto (antes también provocaba el duplicado); se avisa para elegir otro.
+
+## 2026-09-29 — Editar datos de un partido ya creado
+
+- **Botón "✏️ Editar datos"** en la ficha del partido (junto al título): permite corregir rival, fecha, hora, condición (casa/fuera) y tipo de partido después de haberlo dado de alta. Al guardar se actualiza también el listado de partidos; "Cancelar" deja todo como estaba. La convocatoria, cuartos, alineaciones y goles no se tocan.
+- **Foto de convocatoria editable**: el selector de fichero se sustituye por un botón "📷 Subir foto" que pasa a ser "📷 Cambiar foto" cuando ya hay una, y un botón "Quitar foto" (con confirmación). Al cambiar la foto se ve la nueva al momento (antes podía seguir apareciendo la anterior por caché) y la antigua se borra del almacenamiento para no acumular ficheros huérfanos.
+
 ## 2026-09-12 (2) — Orientación del campo, botón de eliminar, gol rápido y estadísticas/libro
 
 - **Portero abajo en la vista de campo**: se ha invertido el orden de las líneas — ahora se pinta delantero arriba y portero abajo, como un campo visto desde el propio banquillo. El lateral/central izquierdo sigue apareciendo a la izquierda de la pantalla y el derecho a la derecha (no se ha tocado ese eje).
