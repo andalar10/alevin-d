@@ -2,6 +2,26 @@
 
 Histórico funcional del proyecto (qué cambia para el usuario, no detalles técnicos de implementación).
 
+## 2026-11-07 (2) — La convocatoria del libro se dibuja con los datos de la app
+
+- **Nueva opción por defecto en el libro: "A mano, con los datos de la app"**. Ya no hace falta subir ningún PDF: la hoja de cuaderno de cada partido se rellena con los jugadores convocados (dorsal y nombre, por orden de dorsal) y, debajo, los **"No disponibles" en tinta roja con su motivo** (Decisión técnica, Viaje…). Sale en todos los partidos, no solo en los de liga.
+- Los ausentes que salen son los que tienen motivo anotado en la convocatoria del partido; si un jugador no viene y no se le ha puesto motivo, no aparece en la lista.
+- En esa página ya no se repite la línea pequeña "No convocados: …", porque está en la hoja.
+- Se mantienen las otras opciones (imagen del PDF subido, a mano con el texto transcrito del PDF, o no incluirla) y la subida opcional del PDF.
+
+## 2026-11-07 — Convocatoria del entrenador en PDF y libro con distribución según la imagen
+
+- **"Foto de convocatoria" pasa a llamarse "Imagen del partido"** en la ficha del partido (botones "Subir/Cambiar/Quitar imagen" incluidos). Es la misma imagen de antes, solo cambia el nombre.
+- **Nueva sección "📄 Convocatoria del entrenador (PDF)"** en la ficha del partido (pensada para los partidos de liga). Al subir el PDF, la app guarda el original, una **captura de la primera página** recortada de márgenes en blanco y el **texto** del PDF.
+  - Si el PDF es de texto (lo normal cuando lo genera un programa), el texto se lee directamente, sin errores. Solo si es un escaneo se usa OCR, que puede equivocarse y lo avisa.
+  - El texto es una **transcripción editable**: una línea por jugador o dato. Hay vista previa de cómo quedaría "a mano", botón "Volver a leer" y "Abrir PDF original".
+- **Libro de temporada: elegir cómo va la convocatoria.** Nuevas opciones en la pantalla del libro: *Imagen del PDF (tal cual)*, *Transcrita a mano* (hoja de cuaderno con letra manuscrita) o *No incluirla*. Se recuerda la última elección.
+- **La página de cada partido cambia de distribución según la imagen:**
+  - *Imagen horizontal*: arriba a todo el ancho, y debajo, a la izquierda el resultado y los goles y a la derecha la convocatoria.
+  - *Imagen vertical*: columna alta a un lado (alterna izquierda/derecha entre partidos), con los goles debajo; en la otra columna el resultado y la convocatoria.
+  - La imagen lleva marco de foto con cinta y una ligera inclinación, distinta en cada partido, y la convocatoria va como nota pegada. Los 4 campos con las alineaciones siguen siempre abajo.
+  - Los partidos sin PDF (p.ej. amistosos) no reservan hueco: la imagen y los campos ganan espacio.
+
 ## 2026-10-21 (4) — Libro de temporada con páginas por partido y descarga en PDF
 
 - **Una página por partido**: arriba el cartel de la convocatoria del partido (con los escudos y el rótulo del equipo), la fecha/hora/condición, el resultado en grande (con el equipo local primero), la lista de goleadores y asistentes con el cuarto en que se marcó, y debajo **4 dibujos de campo, uno por cuarto**, con la alineación (código y nombre de cada jugador, portero abajo) y el marcador del cuarto. Si el partido no tiene cartel, se pone un rótulo con los nombres de los equipos. Se mantiene la línea de "No convocados" con su motivo.

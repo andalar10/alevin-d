@@ -6,7 +6,7 @@
 <title>Alevín D</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bangers&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Bangers&family=Caveat:wght@500;700&display=swap" rel="stylesheet">
 <style>
   :root{
     --azul:#1d4ed8; --azul-osc:#1e3a8a; --gris:#f4f5f7; --borde:#d8dbe0;
@@ -614,9 +614,18 @@ async function cargarDetallePartido(id){
     const { data: firmada } = await sb.storage.from('alevin-d-fotos').createSignedUrl(partido.foto_convocatoria_path, 3600);
     fotoUrl = firmada?.signedUrl || null;
   }
+  let convPdfUrl = null, convImgUrl = null;
+  if(partido && partido.convocatoria_pdf_path){
+    const { data: f } = await sb.storage.from('alevin-d-fotos').createSignedUrl(partido.convocatoria_pdf_path, 3600);
+    convPdfUrl = f?.signedUrl || null;
+  }
+  if(partido && partido.convocatoria_img_path){
+    const { data: f } = await sb.storage.from('alevin-d-fotos').createSignedUrl(partido.convocatoria_img_path, 3600);
+    convImgUrl = f?.signedUrl || null;
+  }
   const noConvocados = {}; // jugador_id -> motivo_id
   (noConvRes.data || []).forEach(r => { noConvocados[r.jugador_id] = r.motivo_id; });
-  DETALLE = { partido, convocatoria: conv || [], cuartos, fotoUrl, noConvocados };
+  DETALLE = { partido, convocatoria: conv || [], cuartos, fotoUrl, convPdfUrl, convImgUrl, noConvocados };
 }
 function jugadorPorId(id){ return JUGADORES.find(j => j.id === id); }
 
@@ -684,15 +693,16 @@ function renderPartidoDetalle(){
         <div style="align-self:flex-end;"><button class="btn sec" onclick="guardarResultadoFinal(this)">Guardar resultado</button></div>
       </div>
       <details style="margin-top:12px;" ${FOTO_ABIERTA ? 'open' : ''} ontoggle="FOTO_ABIERTA = this.open;">
-      <summary style="cursor:pointer;font-weight:600;font-size:15px;padding:6px 0;">📷 Foto de convocatoria <span class="muted" style="font-weight:normal;">— ${p.foto_convocatoria_path ? 'pulsa para ver' : 'sin foto'}</span></summary>
+      <summary style="cursor:pointer;font-weight:600;font-size:15px;padding:6px 0;">📷 Imagen del partido <span class="muted" style="font-weight:normal;">— ${p.foto_convocatoria_path ? 'pulsa para ver' : 'sin imagen'}</span></summary>
       <input type="file" id="pd-foto" accept="image/*" style="display:none;" onchange="subirFotoConvocatoria(this.files[0])">
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
-        <button class="btn sec" type="button" onclick="document.getElementById('pd-foto').click()">📷 ${p.foto_convocatoria_path ? 'Cambiar foto' : 'Subir foto'}</button>
-        ${p.foto_convocatoria_path ? `<button class="btn danger" type="button" onclick="quitarFotoConvocatoria(this)">Quitar foto</button>` : ''}
+        <button class="btn sec" type="button" onclick="document.getElementById('pd-foto').click()">📷 ${p.foto_convocatoria_path ? 'Cambiar imagen' : 'Subir imagen'}</button>
+        ${p.foto_convocatoria_path ? `<button class="btn danger" type="button" onclick="quitarFotoConvocatoria(this)">Quitar imagen</button>` : ''}
       </div>
       <p id="pd-foto-estado" class="muted"></p>
-      ${DETALLE.fotoUrl ? `<p><img src="${DETALLE.fotoUrl}" alt="Foto de convocatoria" style="max-width:100%;border-radius:6px;margin-top:8px;"></p>` : ''}
+      ${DETALLE.fotoUrl ? `<p><img src="${DETALLE.fotoUrl}" alt="Imagen del partido" style="max-width:100%;border-radius:6px;margin-top:8px;"></p>` : ''}
       </details>
+      ${renderSeccionConvocatoriaPdf(p)}
       <details style="margin-top:14px;">
         <summary class="muted" style="cursor:pointer;font-size:12px;">Opciones avanzadas</summary>
         <button class="btn danger" style="margin-top:8px;font-size:12px;padding:4px 10px;" onclick="eliminarPartido(this)">Eliminar partido</button>
@@ -713,6 +723,7 @@ function renderPartidoDetalle(){
     ${cuartosHtml}
     ${renderResumenCuartosJugados()}
   `;
+  if(CONV_PDF_ABIERTA) pintarPreviewManuscrita();
 }
 // Lista de goles del partido (todos los cuartos), bajo el resultado.
 function renderGoleadoresPartido(){
@@ -916,7 +927,7 @@ async function anadirTemporalYConvocar(boton){
 async function subirFotoConvocatoria(file){
   if(!file) return;
   const estado = document.getElementById('pd-foto-estado');
-  if(estado) estado.innerHTML = '<span class="spinner" style="border-color:#777;"></span>Subiendo foto…';
+  if(estado) estado.innerHTML = '<span class="spinner" style="border-color:#777;"></span>Subiendo imagen…';
   FOTO_ABIERTA = true;
   const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
   // Nombre único por subida: al cambiar la foto no se queda en caché la anterior.
@@ -935,12 +946,264 @@ async function subirFotoConvocatoria(file){
 }
 
 async function quitarFotoConvocatoria(boton){
-  if(!confirm('¿Quitar la foto de convocatoria de este partido?')) return;
+  if(!confirm('¿Quitar la imagen de este partido?')) return;
   const pathAnterior = DETALLE?.partido?.foto_convocatoria_path;
   await conSpinner(boton, 'Quitando…', async () => {
     const { error } = await sb.from('alevin_d_partidos').update({ foto_convocatoria_path: null }).eq('id', PARTIDO_ACTUAL);
     if(error) return alert(error.message);
     if(pathAnterior) await sb.storage.from('alevin-d-fotos').remove([pathAnterior]);
+    await cargarPartidos();
+    await cargarDetallePartido(PARTIDO_ACTUAL);
+    renderPartidoDetalle();
+  });
+}
+
+/* ============================================================
+   CONVOCATORIA DEL ENTRENADOR (PDF)
+   Se sube el PDF; la app guarda el original, una captura de la
+   primera página (recortada de márgenes en blanco) y el texto.
+   El texto se lee directamente del PDF si es un PDF "de texto"
+   (exacto, sin errores); solo si es un escaneo se usa OCR
+   (Tesseract), que puede equivocarse → el texto es editable.
+   ============================================================ */
+let CONV_PDF_ABIERTA = false;
+const PDFJS_VERSION = '3.11.174';
+const _scriptsCargados = {};
+function cargarScriptExterno(src){
+  if(!_scriptsCargados[src]){
+    _scriptsCargados[src] = new Promise((ok, ko) => {
+      const s = document.createElement('script');
+      s.src = src; s.onload = ok; s.onerror = () => ko(new Error('No se pudo cargar ' + src));
+      document.head.appendChild(s);
+    });
+  }
+  return _scriptsCargados[src];
+}
+function escHtml(t){
+  return String(t ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+async function cargarPdfJs(){
+  if(!window.pdfjsLib){
+    await cargarScriptExterno(`https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_VERSION}/pdf.min.js`);
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_VERSION}/pdf.worker.min.js`;
+  }
+  return window.pdfjsLib;
+}
+// Agrupa los fragmentos de texto de una página en líneas (por posición vertical).
+// Un hueco grande entre fragmentos de la misma línea se separa con dos espacios.
+function agruparLineasPdf(items){
+  const frag = items.filter(it => it.str && it.str.trim() !== '').map(it => ({
+    x: it.transform[4], y: it.transform[5], w: it.width || 0, h: Math.abs(it.transform[3]) || 10, t: it.str
+  }));
+  frag.sort((a, b) => b.y - a.y || a.x - b.x);
+  const lineas = [];
+  frag.forEach(f => {
+    const l = lineas.find(l => Math.abs(l.y - f.y) <= Math.max(2, f.h * 0.4));
+    if(l) l.frag.push(f); else lineas.push({ y: f.y, frag: [f] });
+  });
+  lineas.sort((a, b) => b.y - a.y);
+  return lineas.map(l => {
+    l.frag.sort((a, b) => a.x - b.x);
+    let txt = '', finPrev = null;
+    l.frag.forEach(f => {
+      if(finPrev !== null){
+        const hueco = f.x - finPrev;
+        txt += hueco > f.h * 1.2 ? '  ' : (hueco > f.h * 0.15 && !/\s$/.test(txt) && !/^\s/.test(f.t) ? ' ' : '');
+      }
+      txt += f.t; finPrev = f.x + f.w;
+    });
+    return txt.replace(/[ \t]+$/g, '').replace(/^[ \t]+/, '');
+  }).filter(Boolean);
+}
+// Recorta los márgenes blancos de un canvas (deja un pequeño margen).
+function recortarBlancos(canvas, margen){
+  const ctx = canvas.getContext('2d');
+  const { width: W, height: H } = canvas;
+  const d = ctx.getImageData(0, 0, W, H).data;
+  let x0 = W, y0 = H, x1 = -1, y1 = -1;
+  for(let y = 0; y < H; y++){
+    for(let x = 0; x < W; x++){
+      const i = (y * W + x) * 4;
+      if(d[i + 3] > 10 && (d[i] < 244 || d[i + 1] < 244 || d[i + 2] < 244)){
+        if(x < x0) x0 = x; if(x > x1) x1 = x; if(y < y0) y0 = y; if(y > y1) y1 = y;
+      }
+    }
+  }
+  if(x1 < 0) return canvas; // página en blanco
+  x0 = Math.max(0, x0 - margen); y0 = Math.max(0, y0 - margen);
+  x1 = Math.min(W - 1, x1 + margen); y1 = Math.min(H - 1, y1 + margen);
+  const out = document.createElement('canvas');
+  out.width = x1 - x0 + 1; out.height = y1 - y0 + 1;
+  const octx = out.getContext('2d');
+  octx.fillStyle = '#fff'; octx.fillRect(0, 0, out.width, out.height);
+  octx.drawImage(canvas, x0, y0, out.width, out.height, 0, 0, out.width, out.height);
+  return out;
+}
+async function ocrCanvas(canvas){
+  await cargarScriptExterno('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
+  const { data } = await window.Tesseract.recognize(canvas, 'spa');
+  return (data.text || '').split('\n').map(l => l.trim()).filter(Boolean);
+}
+// Devuelve { captura:canvas, texto, origen:'texto'|'ocr' } a partir de los bytes del PDF.
+async function leerConvocatoriaPdf(buffer, avisar){
+  const pdfjs = await cargarPdfJs();
+  const pdf = await pdfjs.getDocument({ data: new Uint8Array(buffer) }).promise;
+  const pagina = await pdf.getPage(1);
+  const vp = pagina.getViewport({ scale: 2.5 });
+  const lienzo = document.createElement('canvas');
+  lienzo.width = Math.ceil(vp.width); lienzo.height = Math.ceil(vp.height);
+  const cx = lienzo.getContext('2d');
+  cx.fillStyle = '#fff'; cx.fillRect(0, 0, lienzo.width, lienzo.height);
+  await pagina.render({ canvasContext: cx, viewport: vp }).promise;
+  const captura = recortarBlancos(lienzo, 24);
+  let lineas = [];
+  for(let n = 1; n <= pdf.numPages; n++){
+    const pg = n === 1 ? pagina : await pdf.getPage(n);
+    const tc = await pg.getTextContent();
+    lineas = lineas.concat(agruparLineasPdf(tc.items));
+  }
+  let origen = 'texto';
+  if(lineas.join('').replace(/\s/g, '').length < 20){
+    if(avisar) avisar('El PDF no tiene texto (es un escaneo). Leyéndolo con OCR, puede tardar un poco…');
+    lineas = await ocrCanvas(lienzo);
+    origen = 'ocr';
+  }
+  return { captura, texto: lineas.join('\n'), origen };
+}
+function canvasABlob(canvas, tipo){ return new Promise(res => canvas.toBlob(res, tipo || 'image/png')); }
+function textoOrigenConvocatoria(o){
+  if(o === 'texto') return 'Leído directamente del PDF (sin errores de lectura).';
+  if(o === 'ocr') return 'Leído con OCR de un escaneo: revisa los nombres, puede haber errores.';
+  if(o === 'editado') return 'Texto revisado/editado a mano.';
+  return '';
+}
+
+function renderSeccionConvocatoriaPdf(p){
+  const tiene = !!p.convocatoria_pdf_path;
+  const origen = textoOrigenConvocatoria(p.convocatoria_texto_origen);
+  return `
+      <details style="margin-top:12px;" ${CONV_PDF_ABIERTA ? 'open' : ''} ontoggle="CONV_PDF_ABIERTA = this.open; if(this.open) pintarPreviewManuscrita();">
+      <summary style="cursor:pointer;font-weight:600;font-size:15px;padding:6px 0;">📄 Convocatoria del entrenador (PDF) <span class="muted" style="font-weight:normal;">— ${tiene ? 'PDF subido' : 'sin PDF'}</span></summary>
+      <input type="file" id="pd-conv-pdf" accept="application/pdf,.pdf" style="display:none;" onchange="subirConvocatoriaPdf(this.files[0]); this.value='';">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn sec" type="button" onclick="document.getElementById('pd-conv-pdf').click()">📄 ${tiene ? 'Cambiar PDF' : 'Subir PDF'}</button>
+        ${tiene ? `<button class="btn sec" type="button" onclick="releerConvocatoriaPdf(this)">↻ Volver a leer</button>` : ''}
+        ${DETALLE.convPdfUrl ? `<a class="btn sec" style="text-decoration:none;display:inline-block;" href="${DETALLE.convPdfUrl}" target="_blank" rel="noopener">Abrir PDF original</a>` : ''}
+        ${tiene ? `<button class="btn danger" type="button" onclick="quitarConvocatoriaPdf(this)">Quitar PDF</button>` : ''}
+      </div>
+      <p id="pd-conv-estado" class="muted"></p>
+      ${DETALLE.convImgUrl ? `
+        <h3>Captura (la que va al libro en modo "imagen del PDF")</h3>
+        <p><img src="${DETALLE.convImgUrl}" alt="Captura de la convocatoria" style="max-width:100%;max-height:460px;border:1px solid var(--borde);border-radius:6px;background:#fff;"></p>` : ''}
+      ${tiene ? `
+        <h3>Transcripción (para el modo "transcrita a mano")</h3>
+        <p class="muted" style="margin-top:0;">${origen} Una línea por jugador o dato; lo que dejes aquí es lo que se escribirá "a mano" en el libro.</p>
+        <textarea id="pd-conv-texto" rows="10" style="width:100%;padding:8px;border:1px solid var(--borde);border-radius:5px;font-size:14px;font-family:inherit;">${escHtml(p.convocatoria_texto || '')}</textarea>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+          <button class="btn" type="button" onclick="guardarTranscripcionConvocatoria(this)">Guardar transcripción</button>
+        </div>
+        <h3>Así quedaría "a mano"</h3>
+        <img id="pd-conv-manu" alt="Vista previa de la convocatoria a mano" style="max-width:100%;border-radius:6px;display:none;">` : ''}
+      </details>`;
+}
+// Vista previa de la convocatoria transcrita (mismo dibujo que el libro).
+async function pintarPreviewManuscrita(){
+  const img = document.getElementById('pd-conv-manu');
+  const texto = DETALLE?.partido?.convocatoria_texto;
+  if(!img || !texto || !texto.trim()){ if(img) img.style.display = 'none'; return; }
+  try { await Promise.all([document.fonts.load(`700 40px Caveat`), document.fonts.load(`500 40px Caveat`)]); } catch(e){}
+  const W = 560, margen = 24;
+  const tmp = document.createElement('canvas').getContext('2d');
+  const m = medirManuscrita(tmp, texto, W, 900);
+  const c = document.createElement('canvas');
+  c.width = W + 2 * margen; c.height = Math.ceil(m.h) + 2 * margen;
+  const ctx = c.getContext('2d');
+  dibujarConvocatoriaManuscrita(ctx, texto, margen, margen, W, 900, 0, semillaDeTexto(String(PARTIDO_ACTUAL)));
+  img.src = c.toDataURL('image/png');
+  img.style.display = 'block';
+}
+
+async function guardarConvocatoriaProcesada(r, pdfPath, pdfAnterior, imgAnterior, file){
+  const ts = Date.now();
+  const nuevoPdf = file ? `${PARTIDO_ACTUAL}/convocatoria-pdf-${ts}.pdf` : pdfPath;
+  const nuevaImg = `${PARTIDO_ACTUAL}/convocatoria-captura-${ts}.png`;
+  const blobImg = await canvasABlob(r.captura, 'image/png');
+  if(file){
+    const { error } = await sb.storage.from('alevin-d-fotos').upload(nuevoPdf, file, { upsert: true, contentType: 'application/pdf' });
+    if(error) throw error;
+  }
+  const { error: e1 } = await sb.storage.from('alevin-d-fotos').upload(nuevaImg, blobImg, { upsert: true, contentType: 'image/png' });
+  if(e1) throw e1;
+  const { error: e2 } = await sb.from('alevin_d_partidos').update({
+    convocatoria_pdf_path: nuevoPdf, convocatoria_img_path: nuevaImg,
+    convocatoria_texto: r.texto, convocatoria_texto_origen: r.origen
+  }).eq('id', PARTIDO_ACTUAL);
+  if(e2) throw e2;
+  const viejos = [];
+  if(file && pdfAnterior && pdfAnterior !== nuevoPdf) viejos.push(pdfAnterior);
+  if(imgAnterior && imgAnterior !== nuevaImg) viejos.push(imgAnterior);
+  if(viejos.length) await sb.storage.from('alevin-d-fotos').remove(viejos); // limpieza; si falla no pasa nada
+}
+async function subirConvocatoriaPdf(file){
+  if(!file) return;
+  if(file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name)) return alert('El fichero tiene que ser un PDF.');
+  CONV_PDF_ABIERTA = true;
+  const estado = document.getElementById('pd-conv-estado');
+  const aviso = t => { if(estado) estado.innerHTML = `<span class="spinner" style="border-color:#777;"></span>${t}`; };
+  try {
+    aviso('Leyendo el PDF…');
+    const r = await leerConvocatoriaPdf(await file.arrayBuffer(), aviso);
+    aviso('Guardando…');
+    const p = DETALLE.partido;
+    await guardarConvocatoriaProcesada(r, null, p.convocatoria_pdf_path, p.convocatoria_img_path, file);
+    await cargarPartidos();
+    await cargarDetallePartido(PARTIDO_ACTUAL);
+    renderPartidoDetalle();
+    pintarPreviewManuscrita();
+  } catch(e){
+    if(estado) estado.textContent = '';
+    alert('No se pudo procesar el PDF: ' + (e.message || e));
+  }
+}
+// Vuelve a generar captura y texto a partir del PDF ya guardado (pierde las ediciones del texto).
+async function releerConvocatoriaPdf(boton){
+  const p = DETALLE.partido;
+  if(!p.convocatoria_pdf_path) return;
+  if((p.convocatoria_texto_origen === 'editado') && !confirm('Se volverá a leer el PDF y se perderán los cambios que hayas hecho en la transcripción. ¿Continuar?')) return;
+  await conSpinner(boton, 'Leyendo…', async () => {
+    try {
+      const { data, error } = await sb.storage.from('alevin-d-fotos').download(p.convocatoria_pdf_path);
+      if(error) throw error;
+      const r = await leerConvocatoriaPdf(await data.arrayBuffer(), null);
+      await guardarConvocatoriaProcesada(r, p.convocatoria_pdf_path, null, p.convocatoria_img_path, null);
+      await cargarPartidos();
+      await cargarDetallePartido(PARTIDO_ACTUAL);
+      renderPartidoDetalle();
+      pintarPreviewManuscrita();
+    } catch(e){ alert('No se pudo leer el PDF: ' + (e.message || e)); }
+  });
+}
+async function guardarTranscripcionConvocatoria(boton){
+  const texto = document.getElementById('pd-conv-texto').value.replace(/\s+$/g, '');
+  await conSpinner(boton, 'Guardando…', async () => {
+    const { error } = await sb.from('alevin_d_partidos').update({ convocatoria_texto: texto, convocatoria_texto_origen: 'editado' }).eq('id', PARTIDO_ACTUAL);
+    if(error) return alert(error.message);
+    await cargarPartidos();
+    await cargarDetallePartido(PARTIDO_ACTUAL);
+    renderPartidoDetalle();
+    pintarPreviewManuscrita();
+  });
+}
+async function quitarConvocatoriaPdf(boton){
+  if(!confirm('¿Quitar el PDF de la convocatoria de este partido (incluida la transcripción)?')) return;
+  const p = DETALLE.partido;
+  await conSpinner(boton, 'Quitando…', async () => {
+    const { error } = await sb.from('alevin_d_partidos').update({
+      convocatoria_pdf_path: null, convocatoria_img_path: null, convocatoria_texto: null, convocatoria_texto_origen: null
+    }).eq('id', PARTIDO_ACTUAL);
+    if(error) return alert(error.message);
+    const viejos = [p.convocatoria_pdf_path, p.convocatoria_img_path].filter(Boolean);
+    if(viejos.length) await sb.storage.from('alevin-d-fotos').remove(viejos);
     await cargarPartidos();
     await cargarDetallePartido(PARTIDO_ACTUAL);
     renderPartidoDetalle();
@@ -1427,9 +1690,13 @@ let LIBRO_GENERANDO = false;
 
 async function cargarDatosLibro(){
   const idsPartidos = PARTIDOS.map(p => p.id);
-  if(!idsPartidos.length) return { cuartosPorPartido: {}, noConvocadosPorPartido: {} };
+  if(!idsPartidos.length) return { cuartosPorPartido: {}, noConvocadosPorPartido: {}, convocadosPorPartido: {} };
   const { data: noConv } = await sb.from('alevin_d_no_convocados')
-    .select('partido_id, alevin_d_jugadores(nombre), alevin_d_motivos_no_convocatoria(nombre)').in('partido_id', idsPartidos);
+    .select('partido_id, alevin_d_jugadores(nombre, dorsal), alevin_d_motivos_no_convocatoria(nombre)').in('partido_id', idsPartidos);
+  const { data: convs } = await sb.from('alevin_d_convocatoria')
+    .select('partido_id, dorsal_partido, alevin_d_jugadores(nombre, dorsal)').in('partido_id', idsPartidos);
+  const convocadosPorPartido = {};
+  (convs || []).forEach(r => { (convocadosPorPartido[r.partido_id] ||= []).push(r); });
   const noConvocadosPorPartido = {};
   (noConv || []).forEach(r => { (noConvocadosPorPartido[r.partido_id] ||= []).push(r); });
   const { data: cuartos } = await sb.from('alevin_d_cuartos').select('*').in('partido_id', idsPartidos).order('numero');
@@ -1452,7 +1719,7 @@ async function cargarDatosLibro(){
       goles: goles.filter(g => g.cuarto_id === c.id)
     });
   });
-  return { cuartosPorPartido, noConvocadosPorPartido };
+  return { cuartosPorPartido, noConvocadosPorPartido, convocadosPorPartido };
 }
 
 /* ---------- temporada, secciones y títulos ---------- */
@@ -1644,11 +1911,293 @@ function dibujarCampoCuarto(ctx, x, y, w, h, numero, cuarto, p){
   });
 }
 
-/* ---------- página de un partido ---------- */
-function dibujarPaginaPartido(seccion, p, cuartos, noConv, imgCartel){
+/* ---------- bloques reutilizables de la página de partido ---------- */
+const FUENTE_MANO = "'Caveat', 'Segoe Script', 'Bradley Hand', 'Comic Sans MS', cursive";
+function mulberry32(a){
+  return function(){
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+// Semilla estable a partir de un texto: la "mano" y las inclinaciones de cada partido
+// son siempre las mismas al regenerar el libro.
+function semillaDeTexto(s){
+  let h = 2166136261;
+  for(let i = 0; i < s.length; i++){ h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+function ajustarEnCaja(iw, ih, maxW, maxH){
+  const e = Math.min(maxW / iw, maxH / ih);
+  return { w: iw * e, h: ih * e };
+}
+function cintaAdhesiva(ctx, cx, cy, ang, w){
+  ctx.save();
+  ctx.translate(cx, cy); ctx.rotate(ang);
+  ctx.fillStyle = 'rgba(253,224,71,.74)'; ctx.fillRect(-w / 2, -17, w, 34);
+  ctx.strokeStyle = 'rgba(0,0,0,.09)'; ctx.lineWidth = 2; ctx.strokeRect(-w / 2, -17, w, 34);
+  ctx.restore();
+}
+// Imagen del partido con marco de foto, cinta y una ligera inclinación. Devuelve el rectángulo ocupado.
+function dibujarImagenPartido(ctx, img, x, y, maxW, maxH, rot, lado){
+  const borde = 14;
+  const t = ajustarEnCaja(img.width, img.height, maxW - 2 * borde, maxH - 2 * borde);
+  const bw = t.w + 2 * borde, bh = t.h + 2 * borde;
+  const bx = lado === 'izq' ? x : lado === 'der' ? x + maxW - bw : x + (maxW - bw) / 2;
+  ctx.save();
+  ctx.translate(bx + bw / 2, y + bh / 2); ctx.rotate(rot);
+  ctx.shadowColor = 'rgba(0,0,0,.3)'; ctx.shadowBlur = 20; ctx.shadowOffsetY = 7;
+  ctx.fillStyle = '#fff'; ctx.fillRect(-bw / 2, -bh / 2, bw, bh);
+  ctx.shadowColor = 'transparent';
+  ctx.drawImage(img, -t.w / 2, -t.h / 2, t.w, t.h);
+  cintaAdhesiva(ctx, 0, -bh / 2 + 2, -0.04, 150);
+  ctx.restore();
+  return { x: bx, y, w: bw, h: bh };
+}
+
+/* convocatoria "tal cual" (captura del PDF) */
+function medirConvocatoriaImagen(img, maxW, maxH){
+  const pad = 14, cab = 46;
+  const t = ajustarEnCaja(img.width, img.height, maxW - 2 * pad, maxH - 2 * pad - cab);
+  return { w: t.w + 2 * pad, h: t.h + 2 * pad + cab, tw: t.w, th: t.h, pad, cab };
+}
+function dibujarConvocatoriaImagen(ctx, img, x, y, maxW, maxH, rot){
+  const m = medirConvocatoriaImagen(img, maxW, maxH);
+  ctx.save();
+  ctx.translate(x + m.w / 2, y + m.h / 2); ctx.rotate(rot);
+  ctx.shadowColor = 'rgba(0,0,0,.28)'; ctx.shadowBlur = 18; ctx.shadowOffsetY = 6;
+  ctx.fillStyle = '#fff'; trazoRedondeado(ctx, -m.w / 2, -m.h / 2, m.w, m.h, 10); ctx.fill();
+  ctx.shadowColor = 'transparent';
+  ctx.save();
+  trazoRedondeado(ctx, -m.w / 2, -m.h / 2, m.w, m.h, 10); ctx.clip();
+  ctx.fillStyle = '#1e3a8a'; ctx.fillRect(-m.w / 2, -m.h / 2, m.w, m.cab);
+  ctx.restore();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = `30px ${FUENTE_TITULO}`;
+  textoCartel(ctx, 'CONVOCATORIA', 0, -m.h / 2 + m.cab / 2 + 2, '#fde047', null, 0, false);
+  ctx.drawImage(img, -m.tw / 2, -m.h / 2 + m.cab + m.pad, m.tw, m.th);
+  ctx.strokeStyle = '#1e3a8a'; ctx.lineWidth = 3; trazoRedondeado(ctx, -m.w / 2, -m.h / 2, m.w, m.h, 10); ctx.stroke();
+  ctx.restore();
+  return { x, y, w: m.w, h: m.h };
+}
+
+/* convocatoria transcrita "a mano" (hoja de cuaderno con letra manuscrita) */
+function lineasConvocatoria(texto){
+  return (texto || '').split(/\r?\n/).map(l => l.trim()).filter(l => l && !/^convocatoria$/i.test(l));
+}
+// Admite un texto (una línea por renglón) o una lista de grupos
+// [{ titulo?, color?, cols?, items:[texto] }] (p.ej. "Convocados" y "No disponibles").
+function gruposConvocatoria(datos){
+  if(Array.isArray(datos)) return datos.filter(g => g.items && g.items.length);
+  const items = lineasConvocatoria(datos);
+  return items.length ? [{ items }] : [];
+}
+// Grupos de la convocatoria a partir de los datos que ya tiene la app:
+// jugadores convocados del partido y no disponibles (con su motivo).
+function gruposConvocatoriaApp(convs, noConv){
+  const orden = (a, b) => (a.d ?? 999) - (b.d ?? 999) || a.n.localeCompare(b.n, 'es');
+  const cv = (convs || []).map(c => ({ d: c.dorsal_partido ?? c.alevin_d_jugadores?.dorsal ?? null, n: c.alevin_d_jugadores?.nombre ?? '?' })).sort(orden);
+  const au = (noConv || []).map(r => ({ d: r.alevin_d_jugadores?.dorsal ?? null, n: r.alevin_d_jugadores?.nombre ?? '?', m: r.alevin_d_motivos_no_convocatoria?.nombre })).sort(orden);
+  const fmt = x => `${x.d != null ? '#' + x.d + '  ' : ''}${x.n}`;
+  const grupos = [];
+  if(cv.length) grupos.push({ titulo: `Convocados (${cv.length})`, color: '#1b3a8a', items: cv.map(fmt) });
+  if(au.length) grupos.push({ titulo: 'No disponibles', color: '#9f1d1d', cols: 1, items: au.map(x => fmt(x) + (x.m ? ' — ' + x.m : '')) });
+  return grupos;
+}
+function medirManuscrita(ctx, datos, maxW, maxH){
+  const grupos = gruposConvocatoria(datos);
+  const pad = 28, cab = 84, margenIzq = 66;
+  const altoDisp = maxH - cab - pad;
+  const anchoCol = maxW - margenIzq - pad;
+  const cols = grupos.map(g => g.cols || ((g.items.length > 8 && maxW >= 440) ? 2 : 1));
+  const filasDe = i => Math.ceil(grupos[i].items.length / cols[i]);
+  const totalFilas = () => grupos.reduce((s, g, i) => s + (g.titulo ? 1 : 0) + filasDe(i), 0);
+  // si no caben con altura mínima, se reparten en más columnas (los grupos sin columnas fijadas)
+  while(totalFilas() * 40 > altoDisp){
+    const i = grupos.findIndex((g, k) => !g.cols && cols[k] < 3 && maxW >= 380 * (cols[k] + 1));
+    if(i < 0) break;
+    cols[i]++;
+  }
+  const filas = Math.max(totalFilas(), 1);
+  const altoLinea = Math.max(28, Math.min(50, altoDisp / filas));
+  const colW = cols.map(c => anchoCol / c);
+  let tam = Math.round(altoLinea * 0.82);
+  grupos.forEach((g, i) => g.items.forEach(l => { tam = Math.min(tam, fuenteAjustada(ctx, l, FUENTE_MANO, tam, 16, colW[i] - 14, '500')); }));
+  const h = Math.min(maxH, cab + filas * altoLinea + pad);
+  return { w: maxW, h, grupos, cols, colW, filas, filasGrupo: grupos.map((g, i) => filasDe(i)), altoLinea, tam, pad, cab, margenIzq };
+}
+function dibujarConvocatoriaManuscrita(ctx, datos, x, y, maxW, maxH, rot, semilla){
+  const m = medirManuscrita(ctx, datos, maxW, maxH);
+  const rnd = mulberry32(semilla);
+  ctx.save();
+  ctx.translate(x + m.w / 2, y + m.h / 2); ctx.rotate(rot);
+  const L = -m.w / 2, T = -m.h / 2;
+  // hoja
+  ctx.shadowColor = 'rgba(0,0,0,.28)'; ctx.shadowBlur = 18; ctx.shadowOffsetY = 6;
+  ctx.fillStyle = '#fffdf4'; trazoRedondeado(ctx, L, T, m.w, m.h, 8); ctx.fill();
+  ctx.shadowColor = 'transparent';
+  // renglones y margen rojo
+  ctx.save();
+  trazoRedondeado(ctx, L, T, m.w, m.h, 8); ctx.clip();
+  ctx.strokeStyle = '#cfe0f7'; ctx.lineWidth = 2;
+  for(let i = 0; i < m.filas; i++){
+    const by = T + m.cab + (i + 1) * m.altoLinea - 8;
+    ctx.beginPath(); ctx.moveTo(L, by); ctx.lineTo(L + m.w, by); ctx.stroke();
+  }
+  ctx.strokeStyle = '#f2b1b1'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(L + 54, T); ctx.lineTo(L + 54, T + m.h); ctx.stroke();
+  ctx.restore();
+  // agujeros de archivador
+  ctx.fillStyle = '#e5e7eb'; ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 2;
+  [0.2, 0.5, 0.8].forEach(f => { ctx.beginPath(); ctx.arc(L + 22, T + m.h * f, 8, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); });
+  // título y subrayado ondulado
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  const tamTit = Math.min(66, m.cab - 14);
+  ctx.font = `700 ${tamTit}px ${FUENTE_MANO}`; ctx.fillStyle = '#1b3a8a';
+  const anchoTit = ctx.measureText('Convocatoria').width;
+  ctx.fillText('Convocatoria', L + 76, T + m.cab - 22);
+  ctx.strokeStyle = '#1b3a8a'; ctx.lineWidth = 3; ctx.beginPath();
+  ctx.moveTo(L + 76, T + m.cab - 12);
+  ctx.bezierCurveTo(L + 76 + anchoTit * .3, T + m.cab - 17, L + 76 + anchoTit * .6, T + m.cab - 8, L + 76 + anchoTit, T + m.cab - 14);
+  ctx.stroke();
+  // grupos: subtítulo (opcional) y líneas, cada una con su pequeña irregularidad
+  let fila0 = 0;
+  m.grupos.forEach((g, gi) => {
+    if(g.titulo){
+      ctx.save();
+      ctx.translate(L + m.margenIzq + 10, T + m.cab + (fila0 + 1) * m.altoLinea - 14);
+      ctx.font = `700 ${Math.round(m.tam * 1.08)}px ${FUENTE_MANO}`; ctx.fillStyle = g.color || '#1b3a8a';
+      ctx.fillText(g.titulo, 0, 0);
+      const wt = ctx.measureText(g.titulo).width;
+      ctx.strokeStyle = g.color || '#1b3a8a'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(0, 6); ctx.quadraticCurveTo(wt / 2, 9, wt, 5); ctx.stroke();
+      ctx.restore();
+      fila0++;
+    }
+    g.items.forEach((l, i) => {
+      const col = Math.floor(i / m.filasGrupo[gi]), fila = i % m.filasGrupo[gi];
+      const lx = L + m.margenIzq + col * m.colW[gi] + 10 + (rnd() - .5) * 4;
+      const ly = T + m.cab + (fila0 + fila + 1) * m.altoLinea - 14 + (rnd() - .5) * 3;
+      ctx.save();
+      ctx.translate(lx, ly); ctx.rotate((rnd() - .5) * 0.025);
+      ctx.font = `500 ${m.tam}px ${FUENTE_MANO}`;
+      ctx.fillStyle = g.color || (rnd() > .5 ? '#1b3a8a' : '#24449a');
+      ctx.fillText(recortarTexto(ctx, l, m.colW[gi] - 14), 0, 0);
+      ctx.restore();
+    });
+    fila0 += m.filasGrupo[gi];
+  });
+  cintaAdhesiva(ctx, 0, T + 4, 0.03, 170);
+  ctx.restore();
+  return { x, y, w: m.w, h: m.h };
+}
+
+/* resultado: ancho (nombres a los lados del marcador) o estrecho (nombres encima) */
+function dibujarResultado(ctx, p, cuartos, x, y, w, estrecho){
+  const r = resultadoPartidoLibro(p, cuartos);
+  const fuera = p.condicion === 'fuera';
+  const nombreLocal = fuera ? p.rival : NOMBRE_EQUIPO;
+  const nombreVisit = fuera ? NOMBRE_EQUIPO : p.rival;
+  const marcador = r.ok ? textoMarcador(p, r.ge, r.gr) : '? - ?';
+  const f = p.fecha ? new Date(p.fecha + 'T00:00:00').toLocaleDateString('es-ES', { weekday:'long', day:'numeric', month:'long', year:'numeric' }) : '';
+  const partes = [f, p.hora ? p.hora.slice(0,5) + ' h' : '', p.condicion ? (p.condicion === 'fuera' ? 'Fuera' : 'Casa') : ''].filter(Boolean);
+  const cx = x + w / 2;
+  const esSuma = r.ok && !(p.goles_favor != null && p.goles_contra != null);
+  ctx.textBaseline = 'alphabetic';
+  if(!estrecho){
+    const info = partes.join('  ·  ');
+    ctx.textAlign = 'center'; ctx.font = '30px system-ui, sans-serif'; ctx.fillStyle = '#475569';
+    ctx.fillText(info.charAt(0).toUpperCase() + info.slice(1), cx, y + 22);
+    const yy = y + 56;
+    ctx.font = `130px ${FUENTE_TITULO}`;
+    const anchoMarc = ctx.measureText(marcador).width;
+    textoCartel(ctx, marcador, cx, yy + 105, '#1e3a8a', '#fde047', 10, true);
+    const maxNom = (w - anchoMarc) / 2 - 30;
+    ctx.textAlign = 'right';
+    ctx.font = `${fuenteAjustada(ctx, nombreLocal, FUENTE_TITULO, 54, 26, maxNom)}px ${FUENTE_TITULO}`;
+    textoCartel(ctx, nombreLocal, cx - anchoMarc / 2 - 24, yy + 90, '#1f2430', null, 0, false);
+    ctx.textAlign = 'left';
+    ctx.font = `${fuenteAjustada(ctx, nombreVisit, FUENTE_TITULO, 54, 26, maxNom)}px ${FUENTE_TITULO}`;
+    textoCartel(ctx, nombreVisit, cx + anchoMarc / 2 + 24, yy + 90, '#1f2430', null, 0, false);
+    if(esSuma){ ctx.textAlign = 'center'; ctx.font = '22px system-ui, sans-serif'; ctx.fillStyle = '#94a3b8'; ctx.fillText('(suma de los cuartos)', cx, yy + 138); }
+    return 216;
+  }
+  // estrecho
+  ctx.textAlign = 'center'; ctx.font = '27px system-ui, sans-serif'; ctx.fillStyle = '#475569';
+  // línea 1: la fecha; línea 2: hora y condición
+  const lineasInfo = [f ? f.charAt(0).toUpperCase() + f.slice(1) : '', partes.slice(f ? 1 : 0).join('  ·  ')].filter(Boolean);
+  lineasInfo.forEach((l, i) => ctx.fillText(recortarTexto(ctx, l, w), cx, y + 24 + i * 34));
+  let yy = y + 24 + lineasInfo.length * 34 + 22;
+  const maxNom = w / 2 - 24;
+  ctx.textAlign = 'center';
+  ctx.font = `${fuenteAjustada(ctx, nombreLocal, FUENTE_TITULO, 46, 22, maxNom)}px ${FUENTE_TITULO}`;
+  textoCartel(ctx, nombreLocal, x + w * .25, yy + 34, '#1f2430', null, 0, false);
+  ctx.font = `${fuenteAjustada(ctx, nombreVisit, FUENTE_TITULO, 46, 22, maxNom)}px ${FUENTE_TITULO}`;
+  textoCartel(ctx, nombreVisit, x + w * .75, yy + 34, '#1f2430', null, 0, false);
+  yy += 52;
+  const tamMarc = fuenteAjustada(ctx, marcador, FUENTE_TITULO, 130, 60, w - 20);
+  ctx.font = `${tamMarc}px ${FUENTE_TITULO}`;
+  textoCartel(ctx, marcador, cx, yy + tamMarc * .82, '#1e3a8a', '#fde047', 9, true);
+  yy += tamMarc * .95;
+  if(esSuma){ ctx.font = '21px system-ui, sans-serif'; ctx.fillStyle = '#94a3b8'; ctx.fillText('(suma de los cuartos)', cx, yy + 18); yy += 26; }
+  return yy - y + 10;
+}
+
+/* goles y asistentes; se adapta al ancho y al alto disponibles. Devuelve el alto usado. */
+function dibujarGoles(ctx, goles, r, p, x, y, w, maxH){
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  ctx.font = `40px ${FUENTE_TITULO}`;
+  textoCartel(ctx, 'GOLES', x, y + 30, '#15803d', null, 0, false);
+  if(!goles.length){
+    ctx.font = '30px system-ui, sans-serif'; ctx.fillStyle = '#94a3b8';
+    ctx.fillText(r.ok && (r.ge === 0 || r.ge == null) ? 'Sin goles de Alevín D' : 'Sin goles registrados', x, y + 82);
+    return 104;
+  }
+  let cols = w >= 800 ? 2 : 1, tam;
+  for(;;){
+    const filas = Math.ceil(goles.length / cols);
+    tam = Math.min(30, Math.floor((maxH - 62) / filas) - 12);
+    if(tam >= 20 || cols >= 2) break;
+    cols = 2;
+  }
+  tam = Math.max(tam, 18);
+  const filas = Math.ceil(goles.length / cols), paso = tam + 12, colW = w / cols;
+  goles.forEach((it, i) => {
+    const col = Math.floor(i / filas), fila = i % filas;
+    const gx = x + col * colW, gy = y + 62 + 20 + fila * paso;
+    const autor = it.g.autor?.nombre ?? '?';
+    ctx.fillStyle = '#1f2430'; ctx.font = `bold ${tam}px system-ui, sans-serif`;
+    const pre = `⚽ ${autor}`;
+    ctx.fillText(recortarTexto(ctx, pre, colW - 20), gx, gy);
+    const w0 = ctx.measureText(recortarTexto(ctx, pre, colW - 20)).width;
+    ctx.fillStyle = '#475569'; ctx.font = `${tam - 2}px system-ui, sans-serif`;
+    const txt = it.g.asistente ? ` (asist. ${it.g.asistente.nombre}) · C${it.c}` : ` · C${it.c}`;
+    if(w0 + ctx.measureText(txt).width < colW - 20) ctx.fillText(txt, gx + w0, gy);
+    else ctx.fillText(recortarTexto(ctx, txt, Math.max(40, colW - 20 - w0)), gx + w0, gy);
+  });
+  return 62 + filas * paso + 8;
+}
+function dibujarNoConvocados(ctx, noConv, x, y, w){
+  if(!noConv || !noConv.length) return 0;
+  ctx.font = '22px system-ui, sans-serif'; ctx.fillStyle = '#64748b'; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  const txt = 'No convocados: ' + noConv.map(r2 => `${r2.alevin_d_jugadores?.nombre ?? '?'}${r2.alevin_d_motivos_no_convocatoria?.nombre ? ' (' + r2.alevin_d_motivos_no_convocatoria.nombre + ')' : ''}`).join(', ');
+  const ls = partirEnLineas(ctx, txt, w).slice(0, 3);
+  ls.forEach((l, i) => ctx.fillText(l, x, y + 20 + i * 28));
+  return 16 + ls.length * 28;
+}
+
+/* ---------- página de un partido ----------
+   Dos plantillas según la orientación de la imagen del partido:
+   · horizontal (o sin imagen): imagen a todo el ancho arriba; debajo, a la izquierda
+     resultado y goles y a la derecha la convocatoria.
+   · vertical: la imagen ocupa una columna alta (alternando izquierda/derecha según el
+     partido) y en la otra van resultado, goles y convocatoria.
+   Los 4 campos con las alineaciones ocupan siempre la parte de abajo. */
+function dibujarPaginaPartido(seccion, p, cuartos, noConv, imgCartel, conv, indice){
   const { canvas, ctx } = nuevoLienzo();
   ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, PAG_W, PAG_H);
-  const mx = 70; const anchoUtil = PAG_W - 2 * mx;
+  const mx = 70, anchoUtil = PAG_W - 2 * mx, finY = PAG_H - 50, gap = 30;
 
   // banda superior con el título de la sección
   const gb = ctx.createLinearGradient(0, 0, PAG_W, 0);
@@ -1659,114 +2208,96 @@ function dibujarPaginaPartido(seccion, p, cuartos, noConv, imgCartel){
   ctx.font = `${tamBanda}px ${FUENTE_TITULO}`;
   textoCartel(ctx, seccion.titulo, PAG_W / 2, 42, '#fde047', '#0b1b4d', 6, false);
 
-  // cartel de la convocatoria (con los escudos y el rótulo del partido)
-  let y = 100;
-  if(imgCartel){
-    const maxH = 470;
-    const esc = Math.min(anchoUtil / imgCartel.width, maxH / imgCartel.height);
-    const w = imgCartel.width * esc, h = imgCartel.height * esc;
-    const x = (PAG_W - w) / 2;
-    ctx.save(); ctx.shadowColor = 'rgba(0,0,0,.25)'; ctx.shadowBlur = 14; ctx.shadowOffsetY = 4;
-    ctx.fillStyle = '#fff'; trazoRedondeado(ctx, x, y, w, h, 16); ctx.fill(); ctx.restore();
-    ctx.save(); trazoRedondeado(ctx, x, y, w, h, 16); ctx.clip(); ctx.drawImage(imgCartel, x, y, w, h); ctx.restore();
-    y += h + 26;
-  } else {
-    // sin cartel: rótulo de texto
-    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-    const t = `${NOMBRE_EQUIPO} vs ${p.rival}`;
-    ctx.font = `${fuenteAjustada(ctx, t, FUENTE_TITULO, 96, 40, anchoUtil)}px ${FUENTE_TITULO}`;
-    textoCartel(ctx, t, PAG_W / 2, y + 110, '#1e3a8a', '#fde047', 8, true);
-    y += 170;
-  }
-
-  // fecha / hora / condición
-  const f = p.fecha ? new Date(p.fecha + 'T00:00:00').toLocaleDateString('es-ES', { weekday:'long', day:'numeric', month:'long', year:'numeric' }) : '';
-  const info = [f, p.hora ? p.hora.slice(0,5) + ' h' : '', p.condicion ? (p.condicion === 'fuera' ? 'Fuera' : 'Casa') : ''].filter(Boolean).join('  ·  ');
-  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-  ctx.font = '30px system-ui, sans-serif'; ctx.fillStyle = '#475569';
-  ctx.fillText(info.charAt(0).toUpperCase() + info.slice(1), PAG_W / 2, y + 22);
-  y += 56;
-
-  // resultado (el equipo local siempre primero)
+  const semilla = semillaDeTexto(String(p.id || p.rival));
+  const rnd = mulberry32(semilla);
+  const rotImg = (rnd() - .5) * 0.035, rotConv = (rnd() - .5) * 0.04;
   const r = resultadoPartidoLibro(p, cuartos);
-  const fuera = p.condicion === 'fuera';
-  const nombreLocal = fuera ? p.rival : NOMBRE_EQUIPO;
-  const nombreVisit = fuera ? NOMBRE_EQUIPO : p.rival;
-  const marcador = r.ok ? textoMarcador(p, r.ge, r.gr) : '? - ?';
-  ctx.font = `130px ${FUENTE_TITULO}`;
-  const anchoMarc = ctx.measureText(marcador).width;
-  const cx = PAG_W / 2;
-  textoCartel(ctx, marcador, cx, y + 105, '#1e3a8a', '#fde047', 10, true);
-  const maxNom = (anchoUtil - anchoMarc) / 2 - 30;
-  ctx.textAlign = 'right';
-  ctx.font = `${fuenteAjustada(ctx, nombreLocal, FUENTE_TITULO, 54, 26, maxNom)}px ${FUENTE_TITULO}`;
-  textoCartel(ctx, nombreLocal, cx - anchoMarc / 2 - 24, y + 90, '#1f2430', null, 0, false);
-  ctx.textAlign = 'left';
-  ctx.font = `${fuenteAjustada(ctx, nombreVisit, FUENTE_TITULO, 54, 26, maxNom)}px ${FUENTE_TITULO}`;
-  textoCartel(ctx, nombreVisit, cx + anchoMarc / 2 + 24, y + 90, '#1f2430', null, 0, false);
-  if(r.ok && !(p.goles_favor != null && p.goles_contra != null)){
-    ctx.textAlign = 'center'; ctx.font = '22px system-ui, sans-serif'; ctx.fillStyle = '#94a3b8';
-    ctx.fillText('(suma de los cuartos)', cx, y + 138);
-  }
-  y += 160;
-
-  // goleadores y asistentes
   const goles = [];
   cuartos.slice().sort((a,b) => a.numero - b.numero).forEach(c => c.goles.forEach(g => goles.push({ c: c.numero, g })));
-  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-  ctx.font = `40px ${FUENTE_TITULO}`;
-  textoCartel(ctx, 'GOLES', mx, y + 30, '#15803d', null, 0, false);
-  let yg = y + 62;
-  const colW = anchoUtil / 2;
-  const tamLinea = goles.length > 10 ? 26 : 30;
-  const paso = tamLinea + 12;
-  ctx.font = `${tamLinea}px system-ui, sans-serif`; ctx.fillStyle = '#1f2430';
-  if(!goles.length){
-    ctx.fillStyle = '#94a3b8'; ctx.fillText(r.ok && (r.ge === 0 || r.ge == null) ? 'Sin goles de Alevín D' : 'Sin goles registrados', mx, yg + 20);
-    yg += paso;
+  const vertical = !!imgCartel && imgCartel.height > imgCartel.width * 1.05;
+  const hayConv = !!(conv && ((conv.modo === 'imagen' && conv.img) || (conv.modo === 'manuscrita' && gruposConvocatoria(conv.grupos || conv.texto).length)));
+  if(hayConv && conv.grupos) noConv = null; // los ausentes ya salen en la hoja de convocatoria
+  const yTop = 100;
+  const CAMPO_MIN = 330;
+  const zonaMax = finY - (2 * CAMPO_MIN + gap) - yTop - 20; // alto máximo de la zona superior
+  const dibujaConv = (cx, cy, cw, ch) => conv.modo === 'imagen'
+    ? dibujarConvocatoriaImagen(ctx, conv.img, cx, cy, cw, ch, rotConv)
+    : dibujarConvocatoriaManuscrita(ctx, conv.grupos || conv.texto, cx, cy, cw, ch, rotConv, semilla ^ 0x9e3779b9);
+  let yFin;
+
+  if(!vertical){
+    let y = yTop;
+    if(imgCartel){
+      const rc = dibujarImagenPartido(ctx, imgCartel, mx, y, anchoUtil, hayConv ? 340 : 470, rotImg, 'centro');
+      y += rc.h + 30;
+    } else {
+      ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      const t = `${NOMBRE_EQUIPO} vs ${p.rival}`;
+      ctx.font = `${fuenteAjustada(ctx, t, FUENTE_TITULO, 96, 40, anchoUtil)}px ${FUENTE_TITULO}`;
+      textoCartel(ctx, t, PAG_W / 2, y + 110, '#1e3a8a', '#fde047', 8, true);
+      y += 170;
+    }
+    if(!hayConv){
+      y += dibujarResultado(ctx, p, cuartos, mx, y, anchoUtil, false);
+      y += dibujarGoles(ctx, goles, r, p, mx, y, anchoUtil, 400);
+      y += dibujarNoConvocados(ctx, noConv, mx, y, anchoUtil);
+    } else {
+      const altoBanda = Math.max(260, yTop + zonaMax - y);
+      let convW = conv.grupos ? 580 : 520;
+      if(conv.modo === 'imagen') convW = medirConvocatoriaImagen(conv.img, 560, altoBanda).w;
+      const colIzqW = anchoUtil - convW - 36;
+      const rcv = dibujaConv(mx + anchoUtil - convW, y, convW, altoBanda);
+      let yi = y;
+      yi += dibujarResultado(ctx, p, cuartos, mx, yi, colIzqW, true);
+      yi += dibujarGoles(ctx, goles, r, p, mx, yi, colIzqW, Math.max(120, y + altoBanda - yi - 50));
+      yi += dibujarNoConvocados(ctx, noConv, mx, yi, colIzqW);
+      y = Math.max(yi, y + rcv.h);
+    }
+    yFin = y;
   } else {
-    const porCol = Math.ceil(goles.length / 2);
-    goles.forEach((it, i) => {
-      const col = i < porCol ? 0 : 1;
-      const fila = i < porCol ? i : i - porCol;
-      const gx = mx + col * colW, gy = yg + 20 + fila * paso;
-      const autor = it.g.autor?.nombre ?? '?';
-      ctx.fillStyle = '#1f2430'; ctx.font = `bold ${tamLinea}px system-ui, sans-serif`;
-      const pre = `⚽ ${autor}`;
-      ctx.fillText(recortarTexto(ctx, pre, colW - 20), gx, gy);
-      if(it.g.asistente){
-        const w0 = ctx.measureText(pre).width;
-        ctx.fillStyle = '#475569'; ctx.font = `${tamLinea - 2}px system-ui, sans-serif`;
-        const txt = ` (asist. ${it.g.asistente.nombre}) · C${it.c}`;
-        if(w0 + ctx.measureText(txt).width < colW - 20) ctx.fillText(txt, gx + w0, gy);
-        else ctx.fillText(recortarTexto(ctx, txt, Math.max(40, colW - 20 - w0)), gx + w0, gy);
-      } else {
-        const w0 = ctx.measureText(pre).width;
-        ctx.fillStyle = '#475569'; ctx.font = `${tamLinea - 2}px system-ui, sans-serif`;
-        ctx.fillText(` · C${it.c}`, gx + w0, gy);
-      }
-    });
-    yg += Math.ceil(goles.length / 2) * paso;
+    const lado = (indice % 2 === 0) ? 'izq' : 'der';
+    // Con convocatoria, la imagen cede altura para que los goles queden debajo de ella
+    // y la convocatoria tenga una columna ancha y alta (más legible).
+    const imgMaxW = hayConv ? 450 : 520;
+    const golesEst = goles.length ? 62 + goles.length * 42 + 8 : 104;
+    const imgMaxH = hayConv ? Math.max(420, zonaMax - golesEst - 30) : zonaMax;
+    const t = ajustarEnCaja(imgCartel.width, imgCartel.height, imgMaxW - 28, imgMaxH - 28);
+    const bw = t.w + 28;
+    const colOtraW = anchoUtil - bw - 40;
+    const xImg = lado === 'izq' ? mx : mx + anchoUtil - bw;
+    const xOtra = lado === 'izq' ? mx + bw + 40 : mx;
+    const rc = dibujarImagenPartido(ctx, imgCartel, xImg, yTop, bw, imgMaxH, rotImg, 'izq');
+    let yo = yTop;
+    yo += dibujarResultado(ctx, p, cuartos, xOtra, yo, colOtraW, true);
+    // Con convocatoria: si los goles caben bajo la imagen (columna estrecha, sin usar), van allí
+    // y la convocatoria gana altura en la otra columna.
+    const libreBajoImg = yTop + zonaMax - (yTop + rc.h) - 30;
+    const golesBajoImagen = hayConv && libreBajoImg >= (goles.length ? 62 + goles.length * 30 : 104);
+    let yFinImg = yTop + rc.h;
+    if(golesBajoImagen){
+      yFinImg += 30 + dibujarGoles(ctx, goles, r, p, xImg, yTop + rc.h + 30, bw, libreBajoImg);
+    } else {
+      yo += dibujarGoles(ctx, goles, r, p, xOtra, yo, colOtraW, hayConv ? 190 : 330);
+    }
+    if(hayConv){
+      const altoConv = Math.max(220, yTop + zonaMax - yo - 10);
+      let cw = colOtraW;
+      if(conv.modo === 'imagen') cw = medirConvocatoriaImagen(conv.img, colOtraW, altoConv).w;
+      const rcv = dibujaConv(xOtra + (colOtraW - cw) / 2, yo + 10, cw, altoConv);
+      yo += 10 + rcv.h;
+    }
+    yo += dibujarNoConvocados(ctx, noConv, xOtra, yo, colOtraW);
+    yFin = Math.max(yFinImg, yo);
   }
-  y = yg + 8;
 
-  // no convocados
-  if(noConv && noConv.length){
-    ctx.font = '22px system-ui, sans-serif'; ctx.fillStyle = '#64748b'; ctx.textAlign = 'left';
-    const txt = 'No convocados: ' + noConv.map(r2 => `${r2.alevin_d_jugadores?.nombre ?? '?'}${r2.alevin_d_motivos_no_convocatoria?.nombre ? ' (' + r2.alevin_d_motivos_no_convocatoria.nombre + ')' : ''}`).join(', ');
-    partirEnLineas(ctx, txt, anchoUtil).slice(0, 2).forEach((l, i) => ctx.fillText(l, mx, y + 20 + i * 28));
-    y += 8 + Math.min(2, partirEnLineas(ctx, txt, anchoUtil).length) * 28 + 8;
-  }
-
-  // 4 campos (2 × 2)
-  const finY = PAG_H - 50;
-  const gap = 30;
+  // 4 campos (2 × 2) con el espacio que queda
+  const y0 = yFin + 16;
   const celdaW = (anchoUtil - gap) / 2;
-  const celdaH = (finY - y - gap) / 2;
+  const celdaH = (finY - y0 - gap) / 2;
   for(let n = 1; n <= 4; n++){
     const col = (n - 1) % 2, fila = Math.floor((n - 1) / 2);
     const cuarto = cuartos.find(c => c.numero === n);
-    dibujarCampoCuarto(ctx, mx + col * (celdaW + gap), y + fila * (celdaH + gap), celdaW, celdaH, n, cuarto, p);
+    dibujarCampoCuarto(ctx, mx + col * (celdaW + gap), y0 + fila * (celdaH + gap), celdaW, celdaH, n, cuarto, p);
   }
   return canvasADataUrl(canvas);
 }
@@ -1780,11 +2311,20 @@ async function descargarCartel(path){
     return await createImageBitmap(data);
   } catch(e){ return null; }
 }
+// Modo de la convocatoria del entrenador en el libro: 'imagen' (captura del PDF),
+// 'manuscrita' (transcripción a mano) o 'ninguna'. Se recuerda en el dispositivo.
+function leerModoConvLibro(){
+  const marcado = document.querySelector('input[name="libro-conv"]:checked');
+  if(marcado){ try { localStorage.setItem('alevin_d_libro_conv', marcado.value); } catch(e){} return marcado.value; }
+  try { return localStorage.getItem('alevin_d_libro_conv') || 'app'; } catch(e){ return 'app'; }
+}
 function claveSeleccionLibro(){
-  return [...(LIBRO_TIPOS_SEL || [])].sort().join(',');
+  return [...(LIBRO_TIPOS_SEL || [])].sort().join(',') + '|' + leerModoConvLibro();
 }
 async function generarPaginasLibro(progreso){
   try { await document.fonts.load(`64px Bangers`); } catch(e){}
+  const modoConv = leerModoConvLibro();
+  if(modoConv === 'manuscrita' || modoConv === 'app'){ try { await Promise.all([document.fonts.load(`700 40px Caveat`), document.fonts.load(`500 40px Caveat`)]); } catch(e){} }
   if(!LIBRO_DATOS) LIBRO_DATOS = await cargarDatosLibro();
   const secciones = construirSeccionesLibro(LIBRO_TIPOS_SEL);
   const total = secciones.reduce((s, sec) => s + 1 + sec.partidos.length, 0);
@@ -1796,8 +2336,20 @@ async function generarPaginasLibro(progreso){
     for(const p of sec.partidos){
       const cuartos = (LIBRO_DATOS.cuartosPorPartido[p.id] || []).slice().sort((a,b) => a.numero - b.numero);
       const img = await descargarCartel(p.foto_convocatoria_path);
-      paginas.push(dibujarPaginaPartido(sec, p, cuartos, LIBRO_DATOS.noConvocadosPorPartido[p.id], img));
+      // convocatoria del entrenador (solo si el partido tiene PDF subido): captura o transcripción a mano
+      let conv = null;
+      if(modoConv === 'app'){
+        const gr = gruposConvocatoriaApp(LIBRO_DATOS.convocadosPorPartido[p.id], LIBRO_DATOS.noConvocadosPorPartido[p.id]);
+        if(gr.length) conv = { modo: 'manuscrita', grupos: gr };
+      }
+      else if(modoConv === 'manuscrita' && (p.convocatoria_texto || '').trim()) conv = { modo: 'manuscrita', texto: p.convocatoria_texto };
+      else if(modoConv === 'imagen' && p.convocatoria_img_path){
+        const ci = await descargarCartel(p.convocatoria_img_path);
+        if(ci) conv = { modo: 'imagen', img: ci };
+      }
+      paginas.push(dibujarPaginaPartido(sec, p, cuartos, LIBRO_DATOS.noConvocadosPorPartido[p.id], img, conv, paginas.length));
       if(img && img.close) img.close();
+      if(conv && conv.img && conv.img.close) conv.img.close();
       progreso(++hecho, total);
       await new Promise(r => setTimeout(r, 0)); // deja respirar a la interfaz
     }
@@ -1872,8 +2424,13 @@ function renderLibro(){
   main.innerHTML = `
     <div class="card">
       <h2>Libro de temporada</h2>
-      <p class="muted" style="margin-top:0;">Una página por partido —con el cartel de la convocatoria (escudos), el resultado, los goleadores y asistentes y las alineaciones de los 4 cuartos—, ordenados por fecha y agrupados en secciones por tipo de partido. Elige qué tipos incluir:</p>
+      <p class="muted" style="margin-top:0;">Una página por partido —con la imagen del partido, la convocatoria (convocados y ausentes), el resultado, los goleadores y asistentes y las alineaciones de los 4 cuartos—, ordenados por fecha y agrupados en secciones por tipo de partido. La distribución cambia según la imagen sea horizontal o vertical. Elige qué tipos incluir:</p>
       <div class="libro-tipos">${checks || '<span class="muted">Aún no hay tipos de partido.</span>'}</div>
+      <h3>Convocatoria del entrenador</h3>
+      <div class="libro-tipos">
+        ${[['app','A mano, con los datos de la app (convocados y ausentes)'],['imagen','Imagen del PDF subido (tal cual)'],['manuscrita','A mano, con el texto transcrito del PDF'],['ninguna','No incluirla']].map(([v, t]) =>
+          `<label class="libro-opcion"><input type="radio" name="libro-conv" value="${v}" ${leerModoConvLibro() === v ? 'checked' : ''}> ${t}</label>`).join('')}
+      </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0;">
         <button class="btn sec" type="button" onclick="marcarTodosTiposLibro(true)">Todos</button>
         <button class="btn sec" type="button" onclick="marcarTodosTiposLibro(false)">Ninguno</button>

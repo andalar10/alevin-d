@@ -3,7 +3,7 @@
 ## Protocolo anti-regresión — aplicar antes de editar `index.html`
 
 1. **Descargar siempre la versión real y desplegada antes de editar**: `https://raw.githubusercontent.com/andalar10/alevin-d/main/index.html` (ajustar si el repo/rama cambian). No editar nunca a partir de la copia que esté en el contexto de la conversación sin verificar antes que coincide con la desplegada.
-2. **Comprobar funciones marcadoras tras cada cambio** (grep sobre el fichero para confirmar que siguen presentes): `calcularCodigos`, `renderCuarto`, `renderEditorLineasCuarto`, `renderCampoCuarto`, `guardarCuarto`, `golRapido`, `incrementarMarcador`, `renderPartidoDetalle`, `subirFotoConvocatoria`, `anadirGol`, `renderAdmin`, `cambiarContrasena`, `conSpinner`, `irAPartidoActual`, `renderLibro`, `cargarDatosLibro`, `renderEstadisticas`, `cargarEstadisticas`, `calcularEstadisticasJugadores`.
+2. **Comprobar funciones marcadoras tras cada cambio** (grep sobre el fichero para confirmar que siguen presentes): `calcularCodigos`, `renderCuarto`, `renderEditorLineasCuarto`, `renderCampoCuarto`, `guardarCuarto`, `golRapido`, `incrementarMarcador`, `renderPartidoDetalle`, `subirFotoConvocatoria`, `subirConvocatoriaPdf`, `renderSeccionConvocatoriaPdf`, `dibujarPaginaPartido`, `dibujarConvocatoriaManuscrita`, `gruposConvocatoriaApp`, `anadirGol`, `renderAdmin`, `cambiarContrasena`, `conSpinner`, `irAPartidoActual`, `renderLibro`, `cargarDatosLibro`, `renderEstadisticas`, `cargarEstadisticas`, `calcularEstadisticasJugadores`.
 3. **Actualizar `CHANGELOG.md`** tras cada cambio relevante, describiendo la funcionalidad, no detalles técnicos.
 4. **Validar sintaxis JS** con `node --check` tras cada edición (extraer el bloque `<script>` inline, comprobar el último match).
 
@@ -13,7 +13,7 @@ Todas las tablas del proyecto viven en el esquema `public` con el prefijo `alevi
 
 - `alevin_d_jugadores` — plantilla (fijos y temporales), con `dorsal` y `activo`.
 - `alevin_d_tipos_partido` — catálogo ampliable (Amistoso, Liga, …).
-- `alevin_d_partidos` — rival, fecha, hora, condición, tipo, foto de convocatoria (ruta en Storage), resultado final.
+- `alevin_d_partidos` — rival, fecha, hora, condición, tipo, imagen del partido (`foto_convocatoria_path`, ruta en Storage; en la interfaz se llama "Imagen del partido"), resultado final y, para la convocatoria del entrenador en PDF: `convocatoria_pdf_path` (PDF original), `convocatoria_img_path` (captura PNG de la 1ª página, recortada), `convocatoria_texto` (transcripción editable) y `convocatoria_texto_origen` ('texto' | 'ocr' | 'editado').
 - `alevin_d_convocatoria` — qué jugadores fueron convocados a cada partido (permite dorsal puntual distinto, para temporales).
 - `alevin_d_cuartos` — hasta 4 por partido, con resultado parcial.
 - `alevin_d_alineacion_cuarto` — jugador + línea táctica + orden dentro de la línea + código de posición calculado (o corregido a mano).
@@ -71,7 +71,16 @@ Las líneas se pintan de arriba a abajo en el orden `['delantero','media_punta',
 
 Las páginas se dibujan en canvas A4 (1240×1754 px) y se usan tanto para la vista previa como para el PDF (jsPDF, `cdnjs`). Los escudos NO se almacenan aparte: se usa la foto del cartel de convocatoria (`foto_convocatoria_path`, bucket `alevin-d-fotos`) como cabecera de cada página. Los rótulos usan la fuente Google `Bangers` (constante `FUENTE_TITULO`; cámbiala ahí y en el `<link>` del `<head>` si se quiere otra). Título de sección: `tituloSeccionLibro` ("Pretemporada" lleva el añadido "Temporada"); nombre del equipo en `NOMBRE_COMPLETO_EQUIPO`.
 
+## Libro de temporada (ya implementado)
+
+Se dibuja en canvas (A4 a 150 ppp) y se exporta con jsPDF. Una portada por sección (tipo de partido + temporada) y una página por partido. La plantilla de página depende de la orientación de la imagen del partido (horizontal / vertical, ver `dibujarPaginaPartido`). La convocatoria del entrenador tiene 4 modos elegibles en la pantalla del libro: `app` (por defecto: hoja manuscrita con convocados y no disponibles+motivo sacados de `alevin_d_convocatoria` y `alevin_d_no_convocados`, sin PDF), imagen del PDF, transcrita del PDF (fuente Caveat) o ninguna. Solo salen como ausentes los jugadores con motivo anotado.
+
+El PDF de la convocatoria se procesa en el navegador con pdf.js (cargado bajo demanda desde cdnjs): captura de la 1ª página + texto (`getTextContent`); si no hay texto se usa Tesseract.js (OCR, cargado bajo demanda desde jsDelivr).
+
 ## Histórico de decisiones
 
 - El acceso pasó de "enlace mágico" (OTP por email) a email+contraseña: el envío de correo por defecto de Supabase tiene un límite muy bajo (pensado solo para pruebas) y se compartía con `compra-familiar`, lo que lo agotaba enseguida. Además, para una app de uso al pie del campo, depender del correo en cada entrada era poco práctico.
 - La cuenta `andres.alarcon@gmail.com` ya existía en este proyecto de Supabase (de pruebas anteriores de `compra-familiar`) sin contraseña; se le añadió una directamente por SQL la primera vez en vez de recrearla, para no perder su `id` ni duplicar usuarios.
+
+- 2026-11-07: la convocatoria en PDF se procesa al subirla (captura + texto guardados en BD/Storage) en vez de al generar el libro, para que el libro sea rápido y la transcripción se pueda corregir. "Foto de convocatoria" pasó a llamarse "Imagen del partido" solo en la interfaz; la columna `foto_convocatoria_path` no se renombró para no tocar datos existentes.
+- 2026-11-07: tras ver un PDF real de convocatoria (dorsal+nombre de convocados, No disponibles con motivo, hora, lugar, jornada, equipación) se decidió que el libro dibuje la convocatoria con los datos que ya hay en la app; el PDF queda como opción. Faltan en BD, por si se quieren: jornada, lugar, equipación y hora de convocatoria.
