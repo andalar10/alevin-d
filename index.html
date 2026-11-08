@@ -2094,7 +2094,9 @@ function dibujarConvocatoriaManuscrita(ctx, datos, x, y, maxW, maxH, rot, semill
 }
 
 /* resultado: ancho (nombres a los lados del marcador) o estrecho (nombres encima) */
-function dibujarResultado(ctx, p, cuartos, x, y, w, estrecho){
+// conInfo: pinta fecha, hora y casa/fuera sobre el marcador. Solo se usa cuando el partido NO
+// tiene imagen, porque la imagen del partido ya trae esa información.
+function dibujarResultado(ctx, p, cuartos, x, y, w, estrecho, conInfo){
   const r = resultadoPartidoLibro(p, cuartos);
   const fuera = p.condicion === 'fuera';
   const nombreLocal = fuera ? p.rival : NOMBRE_EQUIPO;
@@ -2106,10 +2108,12 @@ function dibujarResultado(ctx, p, cuartos, x, y, w, estrecho){
   const esSuma = r.ok && !(p.goles_favor != null && p.goles_contra != null);
   ctx.textBaseline = 'alphabetic';
   if(!estrecho){
-    const info = partes.join('  ·  ');
-    ctx.textAlign = 'center'; ctx.font = '30px system-ui, sans-serif'; ctx.fillStyle = '#475569';
-    ctx.fillText(info.charAt(0).toUpperCase() + info.slice(1), cx, y + 22);
-    const yy = y + 56;
+    if(conInfo){
+      const info = partes.join('  ·  ');
+      ctx.textAlign = 'center'; ctx.font = '30px system-ui, sans-serif'; ctx.fillStyle = '#475569';
+      ctx.fillText(info.charAt(0).toUpperCase() + info.slice(1), cx, y + 22);
+    }
+    const yy = y + (conInfo ? 56 : 4);
     ctx.font = `130px ${FUENTE_TITULO}`;
     const anchoMarc = ctx.measureText(marcador).width;
     textoCartel(ctx, marcador, cx, yy + 105, '#1e3a8a', '#fde047', 10, true);
@@ -2121,14 +2125,14 @@ function dibujarResultado(ctx, p, cuartos, x, y, w, estrecho){
     ctx.font = `${fuenteAjustada(ctx, nombreVisit, FUENTE_TITULO, 54, 26, maxNom)}px ${FUENTE_TITULO}`;
     textoCartel(ctx, nombreVisit, cx + anchoMarc / 2 + 24, yy + 90, '#1f2430', null, 0, false);
     if(esSuma){ ctx.textAlign = 'center'; ctx.font = '22px system-ui, sans-serif'; ctx.fillStyle = '#94a3b8'; ctx.fillText('(suma de los cuartos)', cx, yy + 138); }
-    return 216;
+    return conInfo ? 216 : 164;
   }
   // estrecho
   ctx.textAlign = 'center'; ctx.font = '27px system-ui, sans-serif'; ctx.fillStyle = '#475569';
   // línea 1: la fecha; línea 2: hora y condición
-  const lineasInfo = [f ? f.charAt(0).toUpperCase() + f.slice(1) : '', partes.slice(f ? 1 : 0).join('  ·  ')].filter(Boolean);
+  const lineasInfo = !conInfo ? [] : [f ? f.charAt(0).toUpperCase() + f.slice(1) : '', partes.slice(f ? 1 : 0).join('  ·  ')].filter(Boolean);
   lineasInfo.forEach((l, i) => ctx.fillText(recortarTexto(ctx, l, w), cx, y + 24 + i * 34));
-  let yy = y + 24 + lineasInfo.length * 34 + 22;
+  let yy = lineasInfo.length ? y + 24 + lineasInfo.length * 34 + 22 : y + 4;
   const maxNom = w / 2 - 24;
   ctx.textAlign = 'center';
   ctx.font = `${fuenteAjustada(ctx, nombreLocal, FUENTE_TITULO, 46, 22, maxNom)}px ${FUENTE_TITULO}`;
@@ -2163,20 +2167,43 @@ function dibujarGoles(ctx, goles, r, p, x, y, w, maxH){
   }
   tam = Math.max(tam, 18);
   const filas = Math.ceil(goles.length / cols), paso = tam + 12, colW = w / cols;
+  // Cada gol: "⚽ Autor (Asistente) · C1". El asistente va solo entre paréntesis; lo que significa
+  // se explica en la leyenda al pie de la página (ver dibujarLeyendaGoles).
+  const partesGol = it => ({
+    pre: `⚽ ${it.g.autor?.nombre ?? '?'}`,
+    post: `${it.g.asistente ? ` (${it.g.asistente.nombre})` : ''} · C${it.c}`
+  });
+  const anchoGol = (pg, t) => {
+    ctx.font = `bold ${t}px system-ui, sans-serif`; const a = ctx.measureText(pg.pre).width;
+    ctx.font = `${t - 2}px system-ui, sans-serif`; return a + ctx.measureText(pg.post).width;
+  };
+  // Tamaño común para todas las filas: el mayor (hasta `tam`) con el que cabe la más larga entera,
+  // para que nunca quede un nombre cortado a medias.
+  let tamFila = tam;
+  const todas = goles.map(partesGol);
+  while(tamFila > 14 && todas.some(pg => anchoGol(pg, tamFila) > colW - 20)) tamFila--;
   goles.forEach((it, i) => {
     const col = Math.floor(i / filas), fila = i % filas;
     const gx = x + col * colW, gy = y + 62 + 20 + fila * paso;
-    const autor = it.g.autor?.nombre ?? '?';
-    ctx.fillStyle = '#1f2430'; ctx.font = `bold ${tam}px system-ui, sans-serif`;
-    const pre = `⚽ ${autor}`;
-    ctx.fillText(recortarTexto(ctx, pre, colW - 20), gx, gy);
-    const w0 = ctx.measureText(recortarTexto(ctx, pre, colW - 20)).width;
-    ctx.fillStyle = '#475569'; ctx.font = `${tam - 2}px system-ui, sans-serif`;
-    const txt = it.g.asistente ? ` (asist. ${it.g.asistente.nombre}) · C${it.c}` : ` · C${it.c}`;
-    if(w0 + ctx.measureText(txt).width < colW - 20) ctx.fillText(txt, gx + w0, gy);
-    else ctx.fillText(recortarTexto(ctx, txt, Math.max(40, colW - 20 - w0)), gx + w0, gy);
+    const pg = todas[i];
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#1f2430'; ctx.font = `bold ${tamFila}px system-ui, sans-serif`;
+    const pre = recortarTexto(ctx, pg.pre, colW - 20);
+    ctx.fillText(pre, gx, gy);
+    const w0 = ctx.measureText(pre).width;
+    ctx.fillStyle = '#475569'; ctx.font = `${tamFila - 2}px system-ui, sans-serif`;
+    ctx.fillText(recortarTexto(ctx, pg.post, Math.max(40, colW - 20 - w0)), gx + w0, gy);
   });
   return 62 + filas * paso + 8;
+}
+// Leyenda pequeña al pie de la página que explica los paréntesis y la C1…C4 de la lista de goles.
+function dibujarLeyendaGoles(ctx, goles, y){
+  if(!goles.length) return;
+  const hayAsist = goles.some(it => it.g.asistente);
+  const txt = (hayAsist ? 'Entre paréntesis, el jugador que dio la asistencia   ·   ' : '') + 'C1–C4: cuarto en el que se marcó el gol';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.font = '20px system-ui, sans-serif'; ctx.fillStyle = '#94a3b8';
+  ctx.fillText(txt, PAG_W / 2, y);
 }
 function dibujarNoConvocados(ctx, noConv, x, y, w){
   if(!noConv || !noConv.length) return 0;
@@ -2238,7 +2265,7 @@ function dibujarPaginaPartido(seccion, p, cuartos, noConv, imgCartel, conv, indi
       y += 170;
     }
     if(!hayConv){
-      y += dibujarResultado(ctx, p, cuartos, mx, y, anchoUtil, false);
+      y += dibujarResultado(ctx, p, cuartos, mx, y, anchoUtil, false, !imgCartel);
       y += dibujarGoles(ctx, goles, r, p, mx, y, anchoUtil, 400);
       y += dibujarNoConvocados(ctx, noConv, mx, y, anchoUtil);
     } else {
@@ -2248,7 +2275,7 @@ function dibujarPaginaPartido(seccion, p, cuartos, noConv, imgCartel, conv, indi
       const colIzqW = anchoUtil - convW - 36;
       const rcv = dibujaConv(mx + anchoUtil - convW, y, convW, altoBanda);
       let yi = y;
-      yi += dibujarResultado(ctx, p, cuartos, mx, yi, colIzqW, true);
+      yi += dibujarResultado(ctx, p, cuartos, mx, yi, colIzqW, true, !imgCartel);
       yi += dibujarGoles(ctx, goles, r, p, mx, yi, colIzqW, Math.max(120, y + altoBanda - yi - 50));
       yi += dibujarNoConvocados(ctx, noConv, mx, yi, colIzqW);
       y = Math.max(yi, y + rcv.h);
@@ -2268,7 +2295,7 @@ function dibujarPaginaPartido(seccion, p, cuartos, noConv, imgCartel, conv, indi
     const xOtra = lado === 'izq' ? mx + bw + 40 : mx;
     const rc = dibujarImagenPartido(ctx, imgCartel, xImg, yTop, bw, imgMaxH, rotImg, 'izq');
     let yo = yTop;
-    yo += dibujarResultado(ctx, p, cuartos, xOtra, yo, colOtraW, true);
+    yo += dibujarResultado(ctx, p, cuartos, xOtra, yo, colOtraW, true, !imgCartel);
     // Con convocatoria: si los goles caben bajo la imagen (columna estrecha, sin usar), van allí
     // y la convocatoria gana altura en la otra columna.
     const libreBajoImg = yTop + zonaMax - (yTop + rc.h) - 30;
@@ -2299,6 +2326,7 @@ function dibujarPaginaPartido(seccion, p, cuartos, noConv, imgCartel, conv, indi
     const cuarto = cuartos.find(c => c.numero === n);
     dibujarCampoCuarto(ctx, mx + col * (celdaW + gap), y0 + fila * (celdaH + gap), celdaW, celdaH, n, cuarto, p);
   }
+  dibujarLeyendaGoles(ctx, goles, PAG_H - 20);
   return canvasADataUrl(canvas);
 }
 

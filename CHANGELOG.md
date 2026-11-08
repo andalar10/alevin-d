@@ -2,6 +2,12 @@
 
 Histórico funcional del proyecto (qué cambia para el usuario, no detalles técnicos de implementación).
 
+## 2026-11-08 — Libro: asistentes legibles y página menos repetitiva
+
+- **Goles con asistente**: ahora se ve `⚽ Dani (Noa) · C1`, con el asistente solo entre paréntesis y siempre completo (el tamaño de letra se ajusta para que ningún nombre quede cortado).
+- **Leyenda al pie de la página** (letra pequeña): "Entre paréntesis, el jugador que dio la asistencia · C1–C4: cuarto en el que se marcó el gol".
+- **Sin datos repetidos**: si el partido tiene imagen, ya no se pinta encima del marcador la fecha, la hora ni casa/fuera (ya salen en la imagen). Si no hay imagen, se mantienen.
+
 ## 2026-11-07 (2) — La convocatoria del libro se dibuja con los datos de la app
 
 - **Nueva opción por defecto en el libro: "A mano, con los datos de la app"**. Ya no hace falta subir ningún PDF: la hoja de cuaderno de cada partido se rellena con los jugadores convocados (dorsal y nombre, por orden de dorsal) y, debajo, los **"No disponibles" en tinta roja con su motivo** (Decisión técnica, Viaje…). Sale en todos los partidos, no solo en los de liga.
